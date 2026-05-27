@@ -116,7 +116,6 @@ fn main() -> Result<()> {
     let pubkey_path = args.output_dir.join("demo.pubkey");
     let root_path = args.output_dir.join("demo.expected_root");
     let manifest_path = args.output_dir.join("demo-manifest.json");
-    let private_path = args.output_dir.join("PRIVATE_KEY_HEX.txt");
 
     fs::write(&wal_path, &jsonl_bytes).with_context(|| format!("write {}", wal_path.display()))?;
     fs::write(&pubkey_path, format!("{pubkey_hex}\n"))
@@ -128,28 +127,72 @@ fn main() -> Result<()> {
     fs::write(&manifest_path, format!("{manifest}\n"))
         .with_context(|| format!("write {}", manifest_path.display()))?;
 
-    // Wrap the hex copy in Zeroizing so the heap allocation is
-    // overwritten when this binding goes out of scope. ed25519-dalek
-    // already zeroizes the SigningKey's internal scalar on Drop via
-    // its `zeroize` feature; this guards the secondary copy we just
-    // serialized.
+    // Private key handling: print to stdout ONCE, between two [Enter]
+    // prompts, so the operator copies it onto paper or a hardware
+    // vault. NEVER written to disk: a hex file in the output dir is
+    // a foot-gun (gets copied with the other artefacts, ends up in
+    // backups, screen-recordings, version control). Wrapped in
+    // Zeroizing so the heap allocation is overwritten when the
+    // binding goes out of scope. ed25519-dalek already zeroises the
+    // SigningKey's internal scalar on Drop via its `zeroize`
+    // feature; this guards the secondary copy we just printed.
     let private_hex: Zeroizing<String> = Zeroizing::new(hex::encode(signing_key.to_bytes()));
-    fs::write(&private_path, format!("{}\n", private_hex.as_str()))
-        .with_context(|| format!("write {}", private_path.display()))?;
-
-    if !args.non_interactive {
+    if args.non_interactive {
+        // --non-interactive paths are reserved for `--deterministic-seed`
+        // (test fixtures). The key is derivable from the seed in the
+        // source, so disclosure is not a fresh leak. Still NOT
+        // written to disk; tests that need it re-derive it
+        // themselves from the seed.
+        if args.deterministic_seed.is_none() {
+            // Defence in depth: the argument-parsing guard at the top
+            // of main() should have caught this already.
+            bail!("--non-interactive requires --deterministic-seed.");
+        }
+        eprintln!();
+        eprintln!("Generated {} records (test fixture, seed exposed in source).", entries.len());
+        eprintln!("  WAL:      {}", wal_path.display());
+        eprintln!("  Pubkey:   {}", pubkey_path.display());
+        eprintln!("  Root:     {}", root_path.display());
+        eprintln!("  Manifest: {}", manifest_path.display());
+        eprintln!("Chain root: {expected_root}");
+        // For test fixtures we deliberately do NOT print the private
+        // key. Anyone running the same seed gets the same key; no
+        // value in surfacing it to test logs.
+    } else {
+        // PRODUCTION PATH: stdout disclosure between two [Enter]
+        // prompts. Operator must capture the hex onto paper or a
+        // hardware vault before pressing Enter the second time;
+        // after that, the SigningKey's memory copy is dropped and
+        // the heap string is zeroised.
         eprintln!();
         eprintln!("Generated {} records.", entries.len());
         eprintln!("  WAL:      {}", wal_path.display());
         eprintln!("  Pubkey:   {}", pubkey_path.display());
         eprintln!("  Root:     {}", root_path.display());
         eprintln!("  Manifest: {}", manifest_path.display());
-        eprintln!("  Private:  {} (MOVE TO OFFLINE VAULT IMMEDIATELY)", private_path.display());
         eprintln!();
         eprintln!("Edit target sequence: {EDIT_TARGET_SEQUENCE}");
         eprintln!("Chain root: {expected_root}");
+        eprintln!();
+        eprintln!("\x1b[1;31m================================================================\x1b[0m");
+        eprintln!("\x1b[1;31m  PRIVATE KEY HEX (this is shown ONCE, copy to offline vault)\x1b[0m");
+        eprintln!("\x1b[1;31m================================================================\x1b[0m");
+        eprintln!();
+        eprintln!("  {}", private_hex.as_str());
+        eprintln!();
+        eprintln!("\x1b[1;31m================================================================\x1b[0m");
+        eprintln!();
+        eprintln!("Press Enter once you have captured the private key.");
+        eprintln!("After Enter, the in-memory copies are zeroised and the binary exits.");
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_line(&mut buf)
+            .context("read operator confirmation after key capture")?;
     }
 
+    // private_hex (Zeroizing<String>) drops here, wiping the heap
+    // allocation. signing_key drops on function return, zeroising
+    // the scalar via ed25519-dalek's `zeroize` feature.
     Ok(())
 }
 
