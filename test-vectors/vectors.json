@@ -1,0 +1,353 @@
+{
+  "schema_version": 1,
+  "wal_format_version": 1,
+  "canonical_json": {
+    "cases": [
+      {
+        "name": "empty_object",
+        "input": {},
+        "expected_canonical_json_utf8": "{}",
+        "expected_payload_hash_blake3": "6e46dd10defc9b56c29a6ec56b508c21f54c08192194e4df25bf36f0c9c3c279"
+      },
+      {
+        "name": "empty_array",
+        "input": [],
+        "expected_canonical_json_utf8": "[]",
+        "expected_payload_hash_blake3": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab"
+      },
+      {
+        "name": "flat_object_unsorted_keys",
+        "input": {
+          "a": 2,
+          "b": 1,
+          "c": 3
+        },
+        "expected_canonical_json_utf8": "{\"a\":2,\"b\":1,\"c\":3}",
+        "expected_payload_hash_blake3": "ec8e5e6668a389412d94279e141e98b4eb35b7c5bff48056a2e8b0d0df7061b1"
+      },
+      {
+        "name": "nested_object",
+        "input": {
+          "a": 1,
+          "outer": {
+            "c": 3,
+            "d": 4
+          }
+        },
+        "expected_canonical_json_utf8": "{\"a\":1,\"outer\":{\"c\":3,\"d\":4}}",
+        "expected_payload_hash_blake3": "20825a737502c95a33f8b2fa8348cce572db04e5a1972d905ad84f58540a2d8c"
+      },
+      {
+        "name": "array_preserves_order",
+        "input": [
+          3,
+          1,
+          2
+        ],
+        "expected_canonical_json_utf8": "[3,1,2]",
+        "expected_payload_hash_blake3": "fdb95223ff0257469111b94c88189d23ad29b22a3ecd3059fdd169c09ea9d123"
+      },
+      {
+        "name": "integer_valued_float",
+        "input": {
+          "value": 2.0
+        },
+        "expected_canonical_json_utf8": "{\"value\":2}",
+        "expected_payload_hash_blake3": "1ce9ecf81de2c4f2bb00c7bff615aef828066e3b04245e71accbb9ed381f829c"
+      },
+      {
+        "name": "ascii_string",
+        "input": {
+          "s": "hello world"
+        },
+        "expected_canonical_json_utf8": "{\"s\":\"hello world\"}",
+        "expected_payload_hash_blake3": "4d1ac1142ee9831048231a1ba1d0ea75a74b87af88055e9380cc0f49d456cf40"
+      },
+      {
+        "name": "named_escapes",
+        "input": {
+          "s": "tab\there\nnewline\\back\"quote"
+        },
+        "expected_canonical_json_utf8": "{\"s\":\"tab\\there\\nnewline\\\\back\\\"quote\"}",
+        "expected_payload_hash_blake3": "ad5d9cd0612aca0e047e128a1c53edec1f0889286e6b3e147dc142d6206fba57"
+      },
+      {
+        "name": "unicode_literal_utf8",
+        "input": {
+          "s": "café 日本 emoji🎉"
+        },
+        "expected_canonical_json_utf8": "{\"s\":\"café 日本 emoji🎉\"}",
+        "expected_payload_hash_blake3": "9ac363d1aea742c3fbf6d0c6aa3ddf1641d7a3300768d2e14ca8e89d4fc569d7"
+      },
+      {
+        "name": "nfc_normalization",
+        "input": {
+          "café": 1,
+          "key": "café"
+        },
+        "expected_canonical_json_utf8": "{\"café\":1,\"key\":\"café\"}",
+        "expected_payload_hash_blake3": "c5491df8d758b908dcd81942c10f7a88d1c9548d8350afb487b78dcaa8ea7306"
+      },
+      {
+        "name": "supplementary_sort",
+        "input": {
+          "￿": 2,
+          "𐀀": 1
+        },
+        "expected_canonical_json_utf8": "{\"𐀀\":1,\"￿\":2}",
+        "expected_payload_hash_blake3": "9e0ea52591b544bc9e818f25ffb6fb1e368da7e4cf764b221b14600c1b798242"
+      },
+      {
+        "name": "banking_payload",
+        "input": {
+          "amount": "100.00",
+          "currency": "EUR",
+          "from": "acct-1",
+          "to": "acct-2",
+          "ts": "2026-05-27T10:00:00Z"
+        },
+        "expected_canonical_json_utf8": "{\"amount\":\"100.00\",\"currency\":\"EUR\",\"from\":\"acct-1\",\"to\":\"acct-2\",\"ts\":\"2026-05-27T10:00:00Z\"}",
+        "expected_payload_hash_blake3": "dab234d573803614e9292183960da7be5c30cd1169d73af8dc6e2b3993795998"
+      }
+    ]
+  },
+  "entry_hash": {
+    "cases": [
+      {
+        "name": "genesis_all_optional_none",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": null,
+          "source": null,
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "5be52ea29daebf24a9807048a6df5c26ccbb8885d7b545c15ba13406e25167f0"
+      },
+      {
+        "name": "event_type_some_empty_distinct_from_none",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "",
+          "source": null,
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "5a85bb7b353993888b968582a61e628154481fb550895a7d1404e1669610403a"
+      },
+      {
+        "name": "event_type_some_value",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "user.login",
+          "source": null,
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "28def972265ee049614b24d224584607460887972fc53e4ff210ce058fa613b1"
+      },
+      {
+        "name": "source_some_value",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": null,
+          "source": "auth-service",
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "e280d5d772b32f8d9daaaf0f659da9effb8c07488e0c1df95f9b149ea0b30917"
+      },
+      {
+        "name": "signed_record_all_four_optional_set",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": null,
+          "source": null,
+          "signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "public_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "expected_entry_hash": "6430d1b56a6f3cadf827caac021c7b2dbb2e6b69ffa1de253daf34f728ced68e"
+      },
+      {
+        "name": "subsequent_chain_link",
+        "input": {
+          "sequence": 2,
+          "timestamp_ns": 1700000001000000000,
+          "prev_hash": "5be52ea29daebf24a9807048a6df5c26ccbb8885d7b545c15ba13406e25167f0",
+          "payload_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "event_type": null,
+          "source": null,
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "29bc0aec5f493c153b50084c4354c3c206065daa86b969e8967caaf84cb9da87"
+      }
+    ]
+  },
+  "sign_hash": {
+    "cases": [
+      {
+        "name": "unsigned_entry_matches_chain_hash",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "user.login",
+          "source": "auth-service",
+          "signature": null,
+          "public_key": null
+        },
+        "expected_sign_hash": "0ad2015edb01f6f3aa87c222e66cbe1d259e47b11d487d70177bb149bfcc67d9"
+      },
+      {
+        "name": "signed_entry_invariant_under_sig_and_pubkey",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "user.login",
+          "source": "auth-service",
+          "signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "public_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "expected_sign_hash": "0ad2015edb01f6f3aa87c222e66cbe1d259e47b11d487d70177bb149bfcc67d9"
+      }
+    ]
+  },
+  "chain_root": {
+    "cases": [
+      {
+        "name": "three_entry_unsigned_chain",
+        "inputs": [
+          {
+            "sequence": 1,
+            "timestamp_ns": 1700000001000000000,
+            "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "payload_hash": "c9957ad92f8b1e90e130589518c853958f2f084daa283876e07e080bbe5bbe52",
+            "event_type": null,
+            "source": null,
+            "signature": null,
+            "public_key": null
+          },
+          {
+            "sequence": 2,
+            "timestamp_ns": 1700000002000000000,
+            "prev_hash": "d6cb0c6b5b95b55c2b7d22627ce2e1afecdd57bf8d14a6d073c37628287fba3f",
+            "payload_hash": "e10e8dcd3d8e4dc38bd261123c385af5b9faa118ecc251c88eb1924990a5fd1a",
+            "event_type": null,
+            "source": null,
+            "signature": null,
+            "public_key": null
+          },
+          {
+            "sequence": 3,
+            "timestamp_ns": 1700000003000000000,
+            "prev_hash": "9a9fedb03250e50435f2399277917990caeb1d4ffbd0a9586f08c7b9ef3169c5",
+            "payload_hash": "48eb20ce7855b30d754e3fa015bbab95f428f1e5f1611eafb531e9365cde7966",
+            "event_type": null,
+            "source": null,
+            "signature": null,
+            "public_key": null
+          }
+        ],
+        "expected_entry_hashes": [
+          "d6cb0c6b5b95b55c2b7d22627ce2e1afecdd57bf8d14a6d073c37628287fba3f",
+          "9a9fedb03250e50435f2399277917990caeb1d4ffbd0a9586f08c7b9ef3169c5",
+          "cb424d972710efbdf8124e0eab56c62861c95df70e9aa39ea067e7545da02380"
+        ],
+        "expected_root": "d69d6d10fdee5f314a2d4f80d5ad8a29e02374f39951746a7388b9cc72088169"
+      }
+    ]
+  },
+  "receipt_canonical_message": {
+    "cases": [
+      {
+        "name": "with_batch_id",
+        "input": {
+          "event_id": "evt-42",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "server_time": "2026-05-27T10:00:00Z",
+          "server_seq": 7,
+          "receipt_sig": "",
+          "server_key_id": "primary-2025",
+          "sig_alg": "ed25519",
+          "batch_id": "batch-9"
+        },
+        "expected_canonical_message_hex": "7370696e652d726563656970742d7631007b2262617463685f6964223a2262617463682d39222c226576656e745f6964223a226576742d3432222c227061796c6f61645f68617368223a2261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162222c227365727665725f6b65795f6964223a227072696d6172792d32303235222c227365727665725f736571223a372c227365727665725f74696d65223a22323032362d30352d32375431303a30303a30305a222c227369675f616c67223a2265643235353139227d",
+        "expected_canonical_message_utf8": "spine-receipt-v1\u0000{\"batch_id\":\"batch-9\",\"event_id\":\"evt-42\",\"payload_hash\":\"abababababababababababababababababababababababababababababababab\",\"server_key_id\":\"primary-2025\",\"server_seq\":7,\"server_time\":\"2026-05-27T10:00:00Z\",\"sig_alg\":\"ed25519\"}"
+      },
+      {
+        "name": "batch_id_null",
+        "input": {
+          "event_id": "evt-43",
+          "payload_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "server_time": "2026-05-27T10:00:01Z",
+          "server_seq": 8,
+          "receipt_sig": "",
+          "server_key_id": "primary-2025",
+          "sig_alg": "ed25519",
+          "batch_id": null
+        },
+        "expected_canonical_message_hex": "7370696e652d726563656970742d7631007b2262617463685f6964223a6e756c6c2c226576656e745f6964223a226576742d3433222c227061796c6f61645f68617368223a2263646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364636463646364222c227365727665725f6b65795f6964223a227072696d6172792d32303235222c227365727665725f736571223a382c227365727665725f74696d65223a22323032362d30352d32375431303a30303a30315a222c227369675f616c67223a2265643235353139227d",
+        "expected_canonical_message_utf8": "spine-receipt-v1\u0000{\"batch_id\":null,\"event_id\":\"evt-43\",\"payload_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"server_key_id\":\"primary-2025\",\"server_seq\":8,\"server_time\":\"2026-05-27T10:00:01Z\",\"sig_alg\":\"ed25519\"}"
+      }
+    ]
+  },
+  "signature": {
+    "cases": [
+      {
+        "name": "lenient_no_domain_prefix",
+        "profile": "lenient",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "user.login",
+          "source": "auth-service",
+          "signature": null,
+          "public_key": null
+        },
+        "signing_key_seed_hex": "4242424242424242424242424242424242424242424242424242424242424242",
+        "public_key_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+        "signed_message_hex": "30616432303135656462303166366633616138376332323265363663626531643235396534376231316434383764373031373762623134396266636336376439",
+        "signature_hex": "77ab8d765df147a99b8ac99e05715e2590af434b02ebcc6c1d1bc51474d0155207917d4e6a02491594e6a8fd6bd1f613d27dbd44ad474915c72240e868f2ea01"
+      },
+      {
+        "name": "strict_with_spine_wal_v1_prefix",
+        "profile": "strict",
+        "input": {
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "user.login",
+          "source": "auth-service",
+          "signature": null,
+          "public_key": null
+        },
+        "signing_key_seed_hex": "4242424242424242424242424242424242424242424242424242424242424242",
+        "public_key_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+        "signed_message_hex": "7370696e652d77616c2d76310030616432303135656462303166366633616138376332323265363663626531643235396534376231316434383764373031373762623134396266636336376439",
+        "signature_hex": "0b55bb479ca0c835b864b6426710f0ad69ede1bdadfe552887346f959678b157f33483a9fca5e5c4e22778e0c33343f4aee789e23284cc0e11cd0d7816bcc90d"
+      }
+    ]
+  }
+}

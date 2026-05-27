@@ -1,0 +1,32 @@
+[package]
+name = "spine-core"
+description = "Pure WAL verification primitives for Spine: BLAKE3 chain hashing and Ed25519 signature verification. No filesystem, no network, no signing."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# Accept ISO 8601 string timestamps in WAL records (in addition to i64 nanoseconds).
+# Adds a chrono dependency. The native CLI enables this for compatibility with
+# WAL files produced by the Node SDK; the wasm playground does not need it
+# because the demo WAL is signed offline with i64 timestamps only.
+iso-timestamps = ["dep:chrono"]
+
+[dependencies]
+blake3 = { version = "1.5", default-features = false, features = ["std"] }
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
+serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+hex = { version = "0.4", default-features = false, features = ["std"] }
+thiserror = "2.0"
+unicode-normalization = { version = "0.1", default-features = false, features = ["std"] }
+# subtle is already transitive via ed25519-dalek; declared explicitly here
+# because the strict verifier uses ConstantTimeEq directly and the dependency
+# should be visible to anyone reading spine-core's Cargo.toml.
+subtle = { version = "2.6", default-features = false }
+chrono = { version = "0.4", default-features = false, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# wasm-bindgen lives in spine-wasm, NOT here. spine-core stays façade-free.

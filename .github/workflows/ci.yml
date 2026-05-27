@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: cargo test (workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --all-features
+
+  wasm-build:
+    name: wasm-pack build (verifier bundle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            spine-wasm/target
+          key: ${{ runner.os }}-wasm-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-
+
+      - name: wasm-pack build (nodejs target)
+        working-directory: spine-wasm
+        run: wasm-pack build --target nodejs --release --out-dir pkg
+
+      - name: Report bundle size
+        run: |
+          ls -lh spine-wasm/pkg/spine_wasm_bg.wasm
+          gzip -c spine-wasm/pkg/spine_wasm_bg.wasm | wc -c | awk '{printf "gzip: %s bytes (~%.0f KB)\n", $1, $1/1024}'
+
+  seeder-and-integration:
+    name: demo-seeder + wasm integration (Node)
+    runs-on: ubuntu-latest
+    needs: wasm-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: demo-seeder (deterministic-seed 42)
+        working-directory: demo-seeder
+        run: cargo run --release -- --deterministic-seed 42 --non-interactive --output-dir out-test
+
+      - name: wasm-pack build
+        working-directory: spine-wasm
+        run: wasm-pack build --target nodejs --release --out-dir pkg
+
+      - name: Node integration test
+        run: node spine-wasm/tests/integration.mjs

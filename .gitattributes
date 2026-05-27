@@ -1,0 +1,31 @@
+# Force LF line endings on every text file in the repo, regardless of
+# the contributor's OS. Without this, a Windows checkout writes CRLF
+# back into commits and a Linux/macOS reviewer's diff explodes.
+# Cross-language vectors and the wasm bundle are byte-pinned; line
+# ending drift would also break the deterministic-build property.
+
+* text=auto eol=lf
+
+# Source: always LF.
+*.rs   text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.sh   text eol=lf
+*.mjs  text eol=lf
+*.js   text eol=lf
+*.jsx  text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+
+# Build artefacts and binaries: never normalise, mark as binary.
+*.wasm  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary

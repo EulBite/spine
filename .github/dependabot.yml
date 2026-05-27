@@ -1,0 +1,51 @@
+# Dependabot configuration for Spine.
+#
+# We watch the crypto dependency surface closely because a CVE in
+# blake3, ed25519-dalek, subtle, curve25519-dalek, or unicode-
+# normalization is, by construction, a CVE in our verifier. Weekly
+# is the right cadence: fast enough to land patches before drift
+# accumulates, slow enough to batch noise from minor bumps.
+#
+# Three roots are watched:
+#   - the workspace at /              (spine-core, spine-cli, spine-wasm)
+#   - demo-seeder                     (excluded from the workspace, separate Cargo.lock)
+#   - GitHub Actions                  (currently empty; the entry is here so
+#                                      future workflows are auto-covered)
+
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+    commit-message:
+      prefix: "deps"
+      include: scope
+
+  - package-ecosystem: cargo
+    directory: "/demo-seeder"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - rust
+      - demo-seeder
+    commit-message:
+      prefix: "deps(demo-seeder)"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "deps(ci)"

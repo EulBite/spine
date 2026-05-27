@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "manifest_version": 1,
+  "verifier_version": "0.1.0",
+  "scenario": "banking-wire-transfer-v1",
+  "records_count": 20,
+  "edit_target_sequence": 11,
+  "expected_public_key": "4d6f1c2b3a4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f",
+  "expected_chain_root": "7f8a3e0b2c4d6e8f0a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f",
+  "wal_url": "/playground/assets/demo-banking-a3f2b1c4.jsonl",
+  "wal_sha256": "a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
+  "wasm_url": "/playground/assets/spine-verifier-9c2b0d18.wasm",
+  "wasm_sha256": "9c2b0d18a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1b",
+  "js_url": "/playground/assets/spine_wasm.js",
+  "js_sha256": "5e1de1d22b08a5e7b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1c3"
+}

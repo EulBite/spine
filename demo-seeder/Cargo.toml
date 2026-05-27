@@ -1,0 +1,35 @@
+[package]
+name = "demo-seeder"
+description = "Operational tool: generate the signed demo banking WAL on an airgapped machine. Not part of the distributed product."
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+# This crate is intentionally OUTSIDE the workspace at spine-public/Cargo.toml.
+# It pulls in `rand`, `rand_chacha`, and `ed25519-dalek` with the `rand_core`
+# feature — banned from `spine-core` and `spine-cli`. Treating it as a
+# separate crate prevents accidental contamination of the verifier crates'
+# wasm32 dependency graph and keeps `cargo build --workspace` fast.
+
+[dependencies]
+spine-core = { path = "../spine-core" }
+
+clap = { version = "4.5", features = ["derive"] }
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "rand_core", "zeroize"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+rand_chacha = "0.3"
+serde_json = "1.0"
+hex = "0.4"
+blake3 = "1.5"
+anyhow = "1.0"
+# Used to wipe the raw 32-byte seed array immediately after building the
+# SigningKey. ed25519-dalek already zeroizes the SigningKey's internal
+# scalar on Drop via its own `zeroize` feature; this dep covers the local
+# `[u8; 32]` we generated the key from.
+zeroize = "1.7"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
