@@ -126,8 +126,9 @@ sha256sum spine-wasm/pkg/spine_wasm_bg.wasm   # must match
   the canonical-JSON subset, include a one-line verification
   block in the body listing the test commands you ran and their
   results (`114/114 pass`, `wasm32 build clean`, etc.).
-- No `Co-Authored-By:` lines unless every named co-author has
-  consented. AI tools are not co-authors by default.
+- Update `CHANGELOG.md` under the `[Unreleased]` heading for any
+  notable or user-facing change. The format follows
+  [Keep a Changelog](https://keepachangelog.com).
 
 ## Pull requests
 
