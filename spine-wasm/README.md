@@ -18,7 +18,7 @@ function verify_demo_wal_json(
     manifest_version: number,       // currently must be 1
 ): string;                          // JSON envelope (see below)
 
-// Secondary: lenient verifier for debug/auditor use only — DO NOT call
+// Secondary: lenient verifier for debug/auditor use only. DO NOT call
 // from the public playground.
 function verify_wal_bytes_json(
     wal_bytes: Uint8Array,
@@ -42,7 +42,7 @@ the JS callsite can branch on it without parsing the human `message`.
 
 When `ok: true`, the report itself carries the verdict in `report.status`
 (`"valid"` or `"invalid"`). A "valid envelope, invalid report" outcome
-means the verifier ran end-to-end but the WAL did not pass — that is the
+means the verifier ran end-to-end but the WAL did not pass. That is the
 common failure shape the playground UI should render.
 
 ## Building the bundle
@@ -62,7 +62,7 @@ wasm-pack build --target web --release           # for the browser playground
 `package.json`, all of which can be consumed by Vite as a local
 `pkg = "../path/to/spine-wasm/pkg"` import.
 
-## Cross-target gate (Phase 3 acceptance)
+## Cross-target gate
 
 `tests/integration.mjs` runs the bundle in Node 20+ against the
 fixture produced by `demo-seeder --deterministic-seed=42`. The fixture
@@ -92,25 +92,25 @@ The script asserts:
 - Strict verifier with a wrong pinned pubkey: `status=invalid`.
 - Strict verifier on an empty input: `ok=false`, `error.kind=EmptyWal`.
 - Lenient verifier on the same fixture: `valid=false` (different
-  signing contract — see [Phase 1.5C cross-API doc-comments]) BUT
+  signing contract, see the cross-API doc-comments) BUT
   `chain_root` byte-for-byte equal to the strict one. This is the
   cross-API parity guarantee surfaced through the wasm boundary.
 
-If any check fails, **the bundle is not cleared for Phase 4 playground
+If any check fails, **the bundle is not cleared for playground
 integration**.
 
 ## Bundle size and determinism
 
 Raw release `.wasm` (pre-`wasm-pack`, post-`cargo build` only): around
 **410 KB** at the time of writing. After `wasm-pack` runs `wasm-opt -Oz`,
-expect **150–200 KB**, and around **80–110 KB** gzipped on the wire.
+expect **150-200 KB**, and around **80-110 KB** gzipped on the wire.
 
 The strict verifier deliberately depends on `unicode-normalization`
 (NFC tables ~100 KB), `subtle`, `blake3`, `ed25519-dalek`, and
-`serde_json`. These are essential — none can be dropped without losing
+`serde_json`. These are essential. None can be dropped without losing
 either the strict-profile guarantees or the cross-language parity.
 
-For Phase 5 (manifest pinning) the wasm bundle is meant to be
+For manifest pinning the wasm bundle is meant to be
 byte-reproducible across rebuilds of the same source. After
 `wasm-pack build --target nodejs --release`, hash the artifact:
 
@@ -123,7 +123,7 @@ sha256sum pkg/spine_wasm_bg.wasm        # must match
 
 If the two digests differ, something non-deterministic is leaking into
 the build (debuginfo paths, timestamps, …) and the manifest pinning
-becomes meaningless. Investigate before Phase 5 — `--remap-path-prefix`
+becomes meaningless. Investigate before relying on manifest pinning. `--remap-path-prefix`
 and `RUSTFLAGS="-C strip=symbols"` are the usual fixes.
 
 ## Why not load `spine-core` directly via `cargo build --target wasm32`?

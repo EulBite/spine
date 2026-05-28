@@ -2,7 +2,7 @@
 
 Spine ships cryptographic verification code that runs in browsers,
 on the command line, and inside production WAL-pipeline servers. We
-take security reports seriously and welcome scrutiny — finding a
+take security reports seriously and welcome scrutiny. Finding a
 real flaw here is high-value work, and a verifier that lies is
 worse than no verifier at all.
 
@@ -26,13 +26,13 @@ We aim to:
   or low risk.
 
 If you do not hear back within the acknowledgement window, please
-follow up — your report may have been caught by a spam filter.
+follow up, as your report may have been caught by a spam filter.
 
 ## What is in scope
 
 The following components, when used as documented:
 
-- **`spine-core`** — the verification library.
+- **`spine-core`**: the verification library.
   - Soundness of `verify_demo_wal` (strict) and `verify_wal_bytes`
     (lenient): chain replay, signature verification, payload-hash
     recomputation, canonical-JSON serialisation.
@@ -42,21 +42,21 @@ The following components, when used as documented:
   - Cross-language fixture divergence (`test-vectors/vectors.json`):
     a Rust vs. Node vs. Python disagreement on canonical JSON,
     entry hash, or signature verification is a security report.
-- **`spine-wasm`** — the WebAssembly façade.
+- **`spine-wasm`**: the WebAssembly façade.
   - The JS-callable surface (`verify_demo_wal_json`,
     `verify_wal_bytes_json`) and its JSON envelope.
   - Bundle-integrity issues that survive the documented bootstrap
     (manifest-pinned hashes, Blob-URL dynamic import).
-- **`spine-cli`** — the offline auditor binary.
+- **`spine-cli`**: the offline auditor binary.
   - Verification correctness; export integrity (the manifest
     that accompanies a JSONL export must commit to a digest of the
     full source WAL, distinct from the filtered subset).
-- **`playground-spec/`** — the integration contract.
+- **`playground-spec/`**: the integration contract.
   - Documented bootstrap order and integrity-check flow.
   - The reference React component's integrity logic (manifest +
     SHA-256 + Blob-URL dynamic import). Cosmetic React issues are
     not security; bypasses of the integrity flow are.
-- **`demo-seeder`** — the offline seeding tool.
+- **`demo-seeder`**: the offline seeding tool.
   - Key-handling hygiene (no key bytes on disk, zeroize-on-drop,
     interactive prompts before display).
   - Self-verify guard: the binary refuses to write outputs that
@@ -69,7 +69,7 @@ These are **not** security issues against this repository:
 
 - Operational integrity of any specific Spine deployment.
   Misconfiguration of a host site's CSP, SRI, cache, or asset
-  pipeline is the deploying site's responsibility — see
+  pipeline is the deploying site's responsibility. See
   `playground-spec/INTEGRATION.md` § 7 for the documented
   requirements.
 - Key-management, HSM integration, key rotation, or multi-signer
@@ -82,7 +82,7 @@ These are **not** security issues against this repository:
 - DoS reports against the lenient CLI auditor on adversarial
   inputs. The strict path has documented hard limits
   (`MAX_RECORDS_DEMO`, `MAX_PAYLOAD_BYTES`); the lenient path does
-  not, by design — it processes large production WALs.
+  not, by design, because it processes large production WALs.
 - Issues that require the attacker to already have the demo
   signing private key, or to control the deploy host's filesystem.
   Those threat models are documented as outside the verifier's
@@ -111,7 +111,7 @@ specific class of tampering. Examples that would qualify:
   Rust, Node, or Python implementations such that a payload-hash
   check passes in one and fails in another.
 - A signature scheme mismatch where bytes signed by the strict
-  contract verify under the lenient one (or vice versa) — the two
+  contract verify under the lenient one (or vice versa). The two
   contracts are namespaced by domain separator precisely to make
   this impossible; a counterexample would be a serious finding.
 - A chain-root computation that ignores ordering, allowing record
@@ -120,5 +120,5 @@ specific class of tampering. Examples that would qualify:
   leaks the pinned value.
 
 If you find anything in the neighbourhood of those, please report
-even if you are not 100% sure — false positives cost us an hour;
+even if you are not 100% sure. False positives cost us an hour;
 false negatives cost us the project.

@@ -6,9 +6,9 @@ members = [
     "spine-wasm",
 ]
 # `demo-seeder/` is a one-off operational tool used on an airgapped machine
-# during Phase 2 of the playground rollout. It is intentionally excluded
+# to seed the playground demo. It is intentionally excluded
 # from the workspace because it pulls in `rand` / `rand_chacha` and
-# enables the `rand_core` feature on `ed25519-dalek` — both banned from
+# enables the `rand_core` feature on `ed25519-dalek`, both banned from
 # the verifier crates' wasm32 dependency graph. Excluding it explicitly
 # (rather than relying on absence from `members`) prevents a future
 # `cargo build --workspace` invocation from accidentally compiling it.

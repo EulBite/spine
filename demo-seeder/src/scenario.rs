@@ -7,7 +7,7 @@
 //! seen Spine before: an account is opened, a few logins and transfers
 //! happen, a privileged config change goes through, an audit export
 //! closes the day. Record 11 (a wire transfer of 100.00 EUR to "Service
-//! Provider Ltd") is the **edit target** — the playground UI lets the
+//! Provider Ltd") is the **edit target**: the playground UI lets the
 //! visitor change the amount string and re-run verification.
 //!
 //! All amount fields are JSON strings, never numbers, in keeping with the
@@ -27,7 +27,7 @@ pub struct ScenarioRecord {
 ///
 /// Sequence numbers are implicit (1..=20, in the order returned). The
 /// timestamp_ns of record N is `BASE_TIMESTAMP_NS + (N - 1) * SECOND_NS`
-/// — see `seeder.rs`.
+/// (see `seeder.rs`).
 ///
 /// Editing this array changes the demo WAL produced by `demo-seeder` and
 /// therefore the manifest pinned in the playground. Don't touch it lightly.

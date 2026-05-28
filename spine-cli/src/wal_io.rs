@@ -49,7 +49,7 @@ pub enum WalIoError {
 /// sorts it as `1, 10, 2, ...`, which the verifier sees as a chain
 /// break starting at the second file. This function returns an error
 /// when it detects that pattern; the user-facing message is more
-/// useful than the cryptic chain_break the verifier would otherwise
+/// useful than the cryptic `chain_break` the verifier would otherwise
 /// surface.
 pub fn collect_wal_segments(dir: &Path) -> Result<Vec<PathBuf>, WalIoError> {
     if !dir.is_dir() {
@@ -72,16 +72,14 @@ pub fn collect_wal_segments(dir: &Path) -> Result<Vec<PathBuf>, WalIoError> {
         let ext_ok = path
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| matches!(e, "wal" | "jsonl"))
-            .unwrap_or(false);
+            .is_some_and(|e| matches!(e, "wal" | "jsonl"));
         if !ext_ok {
             continue;
         }
         let name_ok = path
             .file_name()
             .and_then(|n| n.to_str())
-            .map(|n| !NON_SEGMENT_SIDECARS.contains(&n))
-            .unwrap_or(true);
+            .map_or(true, |n| !NON_SEGMENT_SIDECARS.contains(&n));
         if !name_ok {
             continue;
         }
@@ -104,9 +102,8 @@ pub fn collect_wal_segments(dir: &Path) -> Result<Vec<PathBuf>, WalIoError> {
 fn find_unpadded_numeric(segments: &[PathBuf]) -> Option<String> {
     let mut widths: Vec<(String, usize)> = Vec::new();
     for p in segments {
-        let stem = match p.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s,
-            None => continue,
+        let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
+            continue;
         };
         if !stem.chars().all(|c| c.is_ascii_digit()) {
             continue;

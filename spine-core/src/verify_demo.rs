@@ -553,9 +553,8 @@ fn parse_hex_32(s: &str) -> Result<[u8; 32], String> {
         return Err(format!("expected 64 hex chars, got {}", s.len()));
     }
     let raw = hex::decode(s).map_err(|e| e.to_string())?;
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&raw);
-    Ok(out)
+    raw.try_into()
+        .map_err(|_| "decoded length is not 32 bytes".to_string())
 }
 
 fn parse_hex_64(s: &str) -> Result<[u8; 64], String> {
@@ -563,9 +562,8 @@ fn parse_hex_64(s: &str) -> Result<[u8; 64], String> {
         return Err(format!("expected 128 hex chars, got {}", s.len()));
     }
     let raw = hex::decode(s).map_err(|e| e.to_string())?;
-    let mut out = [0u8; 64];
-    out.copy_from_slice(&raw);
-    Ok(out)
+    raw.try_into()
+        .map_err(|_| "decoded length is not 64 bytes".to_string())
 }
 
 fn constant_time_hex_eq(a: &str, b: &str) -> bool {

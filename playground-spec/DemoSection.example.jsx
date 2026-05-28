@@ -70,7 +70,7 @@ async function bootstrap() {
 
     // 3. JS glue bytes + hash check (BEFORE any code from the glue runs).
     //    A compromised CDN that swaps spine_wasm.js for a malicious build
-    //    would otherwise win — the glue runs unconditionally on import.
+    //    would otherwise win; the glue runs unconditionally on import.
     //    We verify the hash, then dynamic-import the verified bytes via a
     //    Blob URL so the bytes that hashed are the bytes that execute.
     const jsResp = await fetch(manifest.js_url, { cache: 'force-cache' });
@@ -161,7 +161,7 @@ function rewriteAmount(walBytes, editTargetSequence, newAmount) {
     if (!AMOUNT_RE.test(original)) {
         throw new Error(
             `edit target sequence ${editTargetSequence} does not contain an "amount" ` +
-            `field — refusing to silently no-op. The WAL scenario may have changed; ` +
+            `field, refusing to silently no-op. The WAL scenario may have changed; ` +
             `update edit_target_sequence in the manifest or fix this regex.`
         );
     }
@@ -179,7 +179,7 @@ function rewriteAmount(walBytes, editTargetSequence, newAmount) {
     if (tampered === original && newAmount !== extractAmount(original)) {
         throw new Error(
             `regex matched but produced no change at sequence ${editTargetSequence}. ` +
-            `This is a bug in the rewrite logic — investigate.`
+            `This is a bug in the rewrite logic; investigate.`
         );
     }
 
@@ -254,7 +254,7 @@ export default function DemoSection() {
         }
 
         // Pass manifest_version (the strict verifier's
-        // `manifest_version_used` echo) — NOT schema_version. The two
+        // `manifest_version_used` echo), NOT schema_version. The two
         // are namespaced separately so the manifest envelope can
         // evolve without forcing the verifier's pinned version axis to
         // move in lockstep.
@@ -316,7 +316,7 @@ export default function DemoSection() {
     );
 }
 
-// ----- "Ready" state — editor + verifier output --------------------------
+// ----- "Ready" state: editor + verifier output --------------------------
 
 function Ready({
     manifest, walText, editValue, setEditValue,
@@ -389,14 +389,14 @@ function Report({ manifest, envelope }) {
     if (r.status === 'valid') {
         return (
             <div className="report report--valid">
-                <strong>✓ VALID</strong> — {r.events_verified} records verified.
+                <strong>✓ VALID</strong>: {r.events_verified} records verified.
                 <div>Chain root: <code>{r.chain_root.slice(0, 16)}…</code></div>
                 <div>Pinned key fingerprint: <code>{r.expected_pubkey_fp}</code></div>
             </div>
         );
     }
 
-    // status === 'invalid' — find the first non-Valid record outcome
+    // status === 'invalid': find the first non-Valid record outcome
     // and surface it as the side-by-side diff panel that is the demo's
     // pitch. The strict verifier is fail-fast, so the failing record
     // is always the last one in the array.
@@ -470,7 +470,7 @@ function ScopeAccordion() {
             <ul>
                 <li>
                     <strong>Does verify:</strong> the cryptographic integrity of
-                    a signed WAL — hash chain replay, payload-hash recomputation
+                    a signed WAL: hash chain replay, payload-hash recomputation
                     from canonical JSON, Ed25519 signature verification with
                     domain separation. The same code that runs in your browser
                     runs in our standalone CLI auditor.

@@ -56,10 +56,10 @@ pub struct WalStats {
     /// boolean per invariant rather than a single `chain_intact`
     /// summary, so a downstream consumer cannot read "intact: true"
     /// and conclude that signatures or timestamps were checked when
-    /// only prev_hash linkage was. Each flag is independent; the
+    /// only `prev_hash` linkage was. Each flag is independent; the
     /// combination of all-true is not equivalent to running
     /// `spine-cli verify`, which additionally validates
-    /// expected_root, signatures, receipts and hash formats.
+    /// `expected_root`, signatures, receipts and hash formats.
     pub integrity: WalIntegrity,
     pub stream_ids: Vec<String>,
     pub events_with_receipt: u64,
@@ -67,6 +67,11 @@ pub struct WalStats {
     pub is_sdk_format: bool,
 }
 
+// Four independent integrity axes, each reported separately on
+// purpose (see the `integrity` field docs above). Collapsing them into
+// a state machine or enum would hide exactly the per-axis distinction
+// this struct exists to preserve.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Serialize)]
 pub struct WalIntegrity {
     pub prev_hash_links_ok: bool,
@@ -112,19 +117,16 @@ pub fn run(
     }
 
     if let Some(seq) = sequence {
-        match find_event(wal_path, seq)? {
-            Some(entry) => {
-                if !quiet {
-                    println!("{}", serde_json::to_string_pretty(&entry)?);
-                }
-                Ok(true)
+        if let Some(entry) = find_event(wal_path, seq)? {
+            if !quiet {
+                println!("{}", serde_json::to_string_pretty(&entry)?);
             }
-            None => {
-                if !quiet {
-                    eprintln!("Event with sequence {seq} not found");
-                }
-                Ok(false)
+            Ok(true)
+        } else {
+            if !quiet {
+                eprintln!("Event with sequence {seq} not found");
             }
+            Ok(false)
         }
     } else {
         let events = last_events(wal_path, last_n)?;
@@ -202,12 +204,12 @@ fn compute_stats(wal_path: &Path) -> Result<WalStats, InspectCmdError> {
         } else {
             stats.events_without_receipt += 1;
         }
-        match &prev_hash {
-            Some(p) if entry.prev_hash != *p => stats.integrity.prev_hash_links_ok = false,
-            None if entry.prev_hash != GENESIS_PREV_HASH => {
-                stats.integrity.prev_hash_links_ok = false
-            }
-            _ => {}
+        let link_broken = match &prev_hash {
+            Some(p) => entry.prev_hash != *p,
+            None => entry.prev_hash != GENESIS_PREV_HASH,
+        };
+        if link_broken {
+            stats.integrity.prev_hash_links_ok = false;
         }
         if let Some(prev_seq) = prev_sequence {
             if entry.sequence != prev_seq + 1 {
@@ -257,11 +259,13 @@ fn find_event(wal_path: &Path, target: u64) -> Result<Option<WalEntry>, InspectC
         if overshoot {
             return Ok(());
         }
-        if entry.sequence == target {
-            found = Some(entry);
-            overshoot = true;
-        } else if entry.sequence > target {
-            overshoot = true;
+        match entry.sequence.cmp(&target) {
+            std::cmp::Ordering::Equal => {
+                found = Some(entry);
+                overshoot = true;
+            }
+            std::cmp::Ordering::Greater => overshoot = true,
+            std::cmp::Ordering::Less => {}
         }
         Ok(())
     })?;
@@ -371,8 +375,10 @@ fn format_ns(ns: i64) -> String {
     // DateTime when the value overflows seconds, so we fall back to
     // the raw integer in that case rather than panic.
     let secs = ns.div_euclid(1_000_000_000);
+    // `rem_euclid(1_000_000_000)` is always in `0..1_000_000_000`, which
+    // fits a u32, so the truncation can never lose information.
+    #[allow(clippy::cast_possible_truncation)]
     let sub_nanos = ns.rem_euclid(1_000_000_000) as u32;
     DateTime::<Utc>::from_timestamp(secs, sub_nanos)
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_else(|| format!("ns:{ns}"))
+        .map_or_else(|| format!("ns:{ns}"), |dt| dt.to_rfc3339())
 }

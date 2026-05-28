@@ -1,4 +1,4 @@
-# Phase 2 — Demo WAL Offline Seeding
+# Demo WAL Offline Seeding
 
 This document is the operational runbook for generating the signed demo
 WAL that backs the public playground. It is meant to be followed by a
@@ -18,18 +18,18 @@ next to this file; everything it does is documented in `src/main.rs` and
 
 Four files in `--output-dir` (default: current directory):
 
-- `demo.jsonl` — the signed WAL (one JSONL record per line, 20 records).
-- `demo.pubkey` — 64-char lowercase hex of the Ed25519 verifying key.
-- `demo.expected_root` — 64-char lowercase hex of the BLAKE3 chain root.
-- `demo-manifest.json` — playground manifest skeleton with the pinned
+- `demo.jsonl`: the signed WAL (one JSONL record per line, 20 records).
+- `demo.pubkey`: 64-char lowercase hex of the Ed25519 verifying key.
+- `demo.expected_root`: 64-char lowercase hex of the BLAKE3 chain root.
+- `demo-manifest.json`: playground manifest skeleton with the pinned
   crypto values filled in. `wal_sha256` / `wasm_sha256` / `wasm_url` are
-  left as `TODO_FILLED_BY_BUILD` placeholders for the Phase 3/5 pipeline
+  left as `TODO_FILLED_BY_BUILD` placeholders for the build pipeline
   to fill in once the wasm bundle and WAL hash are known.
 
 The **private key** is printed once on stdout, in red, between two
 `[Enter]` prompts, and never written to disk. Capture it manually onto
-paper or a hardware vault. If you lose it, the demo WAL becomes immutable
-— you can verify it forever, but you can never re-sign or extend it.
+paper or a hardware vault. If you lose it, the demo WAL becomes immutable:
+you can verify it forever, but you can never re-sign or extend it.
 
 ## Pre-flight checklist (connected machine)
 
@@ -43,10 +43,11 @@ Run these on the regular development machine, **before** going airgapped:
    ./target/release/demo-seeder --deterministic-seed 42 --non-interactive --output-dir out-test
    ```
 
-   You should see `self-verify: OK (20 records, chain_root 7971c34dcb9181e0…)`.
-   The `chain_root` is reproducible across runs of the same seed — if it
-   ever drifts, something in `spine-core` changed and Phase 1.5 needs
-   re-validating.
+   The run ends with `Generated 20 records (test fixture, seed exposed
+   in source).`, the four output paths, and `Chain root:
+   c36bd135f17fbd48…`. That `chain_root` is reproducible across runs of
+   the same seed; if it ever drifts, something in `spine-core` changed
+   and the cross-language parity needs re-validating.
 
 2. Cross-check the test fixture with `spine-cli verify`:
 
@@ -58,7 +59,7 @@ Run these on the regular development machine, **before** going airgapped:
    ```
 
    Expected output: `valid: false`, `events_verified: 20`,
-   `chain_root: 7971c34d…`. The `valid: false` is **correct** — the
+   `chain_root: c36bd135…`. The `valid: false` is **correct**: the
    lenient verifier (used by `spine-cli`) and the strict verifier
    (used by the playground) sign over different messages by design.
    See the cross-API doc-comments in `verify.rs` and
@@ -94,20 +95,32 @@ anything in.
    /path/to/usb-binary/demo-seeder --records 20 --output-dir ./out
    ```
 
-   No `--deterministic-seed` flag — the production run uses `OsRng`.
+   No `--deterministic-seed` flag: the production run uses `OsRng`. The
+   seeder first prints the scenario, output directory, and pubkey, then
+   waits on `Press Enter to continue, Ctrl-C to abort.`. Review the
+   summary and press `[Enter]`.
 
-3. The seeder prints `self-verify: OK …` and the four "wrote …" lines,
-   then displays a red banner reading
-   `PRIVATE KEY OUTPUT — copy NOW to your offline vault`. Press
-   `[Enter]` to display the private key.
-4. Read the line `PRIVATE_KEY_HEX=<64 hex chars>` and write it down on
-   paper, or burn it into a hardware vault (Yubikey, Trezor, paper
-   wallet). Double-check the hex by reading it back to a colleague or
-   to a recorder. **This is the only time the key will exist outside
-   the running process.**
-5. Press `[Enter]` again. The screen clears (best-effort: scrollback
-   buffers on some terminals may still retain the line — assume the
-   terminal is destroyed after this run).
+3. It generates and self-verifies the WAL, writes the four files
+   (`Generated 20 records.` followed by the WAL / Pubkey / Root /
+   Manifest paths), then prints the private key inside a red banner:
+
+   ```
+   ================================================================
+     PRIVATE KEY HEX (this is shown ONCE, copy to offline vault)
+   ================================================================
+
+     <64 lowercase hex chars>
+
+   ================================================================
+   ```
+4. Write the 64-character hex key onto paper, or burn it into a hardware
+   vault (Yubikey, Trezor, paper wallet). Double-check the hex by reading
+   it back to a colleague or to a recorder. **This is the only time the
+   key will exist outside the running process.**
+5. Press `[Enter]` once the key is captured. The in-memory copies are
+   zeroised and the binary exits. (Best-effort only: scrollback buffers
+   on some terminals may still retain the line, so treat the terminal as
+   disposable after this run.)
 6. Eject the binary USB stick. Plug a separate, freshly-wiped
    transfer USB stick.
 7. Copy the four output files to the transfer stick:
@@ -133,7 +146,7 @@ anything in.
    Confirm `events_verified: 20` and that the `chain_root` matches
    the contents of `demo.expected_root`.
 
-3. Move the four files into the Phase 5 input directory the build
+3. Move the four files into the input directory the build
    pipeline expects (default: `demo-seeder/out/` at the repository
    root, picked up by `playground-spec/build-playground-assets.sh`):
 
@@ -143,7 +156,7 @@ anything in.
    mv /path/to/usb-transfer/demo-manifest.json demo-seeder/out/
    ```
 
-   Phase 5 (hosting) is responsible for hashing `demo.jsonl` into
+   The hosting build is responsible for hashing `demo.jsonl` into
    `wal_sha256` and the wasm bundle into `wasm_sha256`, replacing the
    `TODO_FILLED_BY_BUILD` placeholders in `demo-manifest.json`, and
    pinning the manifest in 3+ independent locations.
@@ -167,20 +180,20 @@ anything in.
 
 - **You are tempted to commit `demo.jsonl` to the public repo.** It is
   ignored by `.gitignore` for this reason. The manifest pinning happens
-  in Phase 5 with a deliberate path; do not pre-commit fixtures.
+  in the build pipeline with a deliberate path; do not pre-commit fixtures.
 
 ## What this binary does NOT do
 
-- Generate or rotate the wasm bundle (Phase 3).
-- Compute SHA256 over `demo.jsonl` and the wasm bundle (Phase 5).
-- Pin the manifest in 3+ independent locations (Phase 5).
-- Talk to any network (`getrandom` is the only entropy source — read
+- Generate or rotate the wasm bundle.
+- Compute SHA256 over `demo.jsonl` and the wasm bundle.
+- Pin the manifest in 3+ independent locations.
+- Talk to any network (`getrandom` is the only entropy source, reading
   from `/dev/urandom` on Linux, BCryptGenRandom on Windows).
 
 ## Determinism flag (testing only)
 
 `--deterministic-seed <u64>` replaces `OsRng` with a ChaCha20-seeded
 RNG. Output is byte-for-byte reproducible across runs of the same seed.
-Useful for CI and regression tests; **fatal in production** — the
+Useful for CI and regression tests; **fatal in production**, because the
 private key has zero entropy. The flag is hidden from `--help`. Anyone
 reaching for it should already know what they are doing.

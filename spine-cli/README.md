@@ -10,13 +10,13 @@ playground, so a WAL that verifies here verifies there byte-for-byte.
 
 ## Subcommands
 
-- `verify` — Run BLAKE3 hash-chain and Ed25519 signature verification over a
+- `verify`: run BLAKE3 hash-chain and Ed25519 signature verification over a
   WAL directory. Exit code is `0` on `valid:true`, `1` on `valid:false`, `2`
   on I/O or input errors.
-- `export` — Emit the audit trail as JSON-Lines, CSV, or RFC 5424 syslog.
+- `export`: emit the audit trail as JSON-Lines, CSV, or RFC 5424 syslog.
   JSONL exports written to file are accompanied by a `.manifest.json` that
   pins the chain root (cross-verifiable with `verify`).
-- `inspect` — Human-readable view: stats, last-N events, lookup by sequence.
+- `inspect`: human-readable view of stats, last-N events, and lookup by sequence.
 
 ## Quick example
 
@@ -42,9 +42,8 @@ the signature and public key are present in the record), and optional
 agreement with a caller-supplied `--expected-root` anchor.
 
 It does **not** verify operational integrity of any Spine deployment, key
-management practices, or compliance posture. See [PLAN.md](../PLAN.md) for
-the strict verifier profile reserved for the public playground, and for the
-broader scope of what this codebase covers vs. what it deliberately omits.
+management practices, or compliance posture. Those concerns belong in audit
+and operational reviews, not in cryptographic code.
 
 ## License
 

@@ -94,7 +94,7 @@ enum Commands {
         #[arg(long)]
         fail_fast: bool,
 
-        /// Path to a JSON keystore mapping server_key_id to Ed25519
+        /// Path to a JSON keystore mapping `server_key_id` to Ed25519
         /// pubkey hex. When supplied, `receipt_sig` on every entry
         /// carrying a receipt is verified against the matching key.
         /// Without it receipts pass through unchecked and a warning

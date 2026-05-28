@@ -2,14 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Eul Bite
 #
-# Phase 5 build pipeline: produces a directory of static assets ready
+# Build pipeline: produces a directory of static assets ready
 # to be deployed under /playground/ on whatever site mounts the
 # playground.
 #
 # Inputs:
 #   - demo-seeder/out/{demo.jsonl, demo.pubkey, demo.expected_root,
 #                      demo-manifest.json}
-#     Produced by the airgapped Phase 2 run, transferred onto this
+#     Produced by the airgapped seeding run, transferred onto this
 #     machine via clean USB. Must have schema_version=1 and the
 #     placeholder strings TODO_FILLED_BY_BUILD for wal_sha256 /
 #     wasm_sha256 / wasm_url.
@@ -17,16 +17,16 @@
 #   - spine-wasm/ source tree.
 #
 # Outputs (in playground-spec/dist/):
-#   manifest.json                 ← finalised, hashes filled in
-#   assets/spine_wasm.js          ← wasm-bindgen JS glue
+#   manifest.json                 <-finalised, hashes filled in
+#   assets/spine_wasm.js          <-wasm-bindgen JS glue
 #   assets/spine-verifier-<sha8>.wasm
 #   assets/demo-banking-<sha8>.jsonl
 #
 # After this script succeeds, copy dist/* into the host site's
 # static-asset directory (typically `public/playground/`).
 # spine_wasm.js is fetched + hashed at runtime against
-# manifest.js_sha256 (see playground-spec/INTEGRATION.md §1, §2) —
-# there is intentionally no SRI digest emitted here, because the
+# manifest.js_sha256 (see playground-spec/INTEGRATION.md §1, §2).
+# There is intentionally no SRI digest emitted here, because the
 # glue is NOT loaded via a static <script src="…"> tag.
 #
 # Requirements:
@@ -34,8 +34,7 @@
 #   - jq        (apt install jq / brew install jq / choco install jq)
 #   - sha256sum
 #   - A binaryen wasm-opt on PATH IF you want size optimisation; absent
-#     binaryen, the script ships the unoptimised bundle. See PLAN.md
-#     "Phase 3 sealed" for the rationale.
+#     binaryen, the script ships the unoptimised bundle.
 
 set -euo pipefail
 
@@ -49,7 +48,7 @@ ASSETS="${DIST}/assets"
 
 if [[ ! -d "${SEED_OUT}" ]]; then
     echo "ERROR: ${SEED_OUT} does not exist." >&2
-    echo "Run Phase 2 (airgapped seeder) first; see demo-seeder/OPERATIONAL.md." >&2
+    echo "Run the airgapped seeder first; see demo-seeder/OPERATIONAL.md." >&2
     exit 1
 fi
 
@@ -77,8 +76,8 @@ if [[ ! -f "${WASM_DIR}/pkg/spine_wasm_bg.wasm" ]]; then
     exit 1
 fi
 
-# Optional binaryen pass — skipped if wasm-opt is missing or refuses the
-# input. The unoptimised bundle is acceptable per the PLAN.md threshold.
+# Optional binaryen pass, skipped if wasm-opt is missing or refuses the
+# input. The unoptimised bundle is acceptable for testing.
 if command -v wasm-opt >/dev/null 2>&1; then
     echo "  Running wasm-opt -Oz (optional)…"
     if wasm-opt -Oz \
@@ -90,7 +89,7 @@ if command -v wasm-opt >/dev/null 2>&1; then
         echo "    shipping the unoptimised bundle."
     fi
 else
-    echo "  (wasm-opt not on PATH — shipping unoptimised bundle)"
+    echo "  (wasm-opt not on PATH, shipping unoptimised bundle)"
 fi
 
 # ---- 2. Compute hashes --------------------------------------------------
@@ -145,13 +144,13 @@ echo ""
 echo "Done. Assets staged in ${DIST}/."
 echo ""
 echo "Next steps:"
-echo "  1. Review ${DIST}/manifest.json — verify wal_sha256, wasm_sha256,"
+echo "  1. Review ${DIST}/manifest.json: verify wal_sha256, wasm_sha256,"
 echo "     and js_sha256 match what was generated."
 echo "  2. Copy ${DIST}/* into the host site's static-asset"
 echo "     directory (typically public/playground/) on the deploy host."
 echo "  3. Configure the host's CSP: script-src 'self' blob: (the"
 echo "     blob: scheme is required for the dynamic-import flow that"
-echo "     loads the verified glue — see playground-spec/INTEGRATION.md"
+echo "     loads the verified glue; see playground-spec/INTEGRATION.md"
 echo "     §7)."
 echo "  4. Republish ${DIST}/manifest.json to two more independent"
 echo "     locations (this repo + a versioned launch blog post)."

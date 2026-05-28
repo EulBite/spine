@@ -14,9 +14,9 @@ crate-type = ["cdylib", "rlib"]
 
 # wasm-pack bundles its own ancient wasm-opt that does not understand the
 # multi-value / reference-types output produced by recent rustc/wasm-bindgen.
-# Disable the bundled optimiser. Phase 5 (hosting) is the right place to
+# Disable the bundled optimiser. The hosting build is the right place to
 # wire in a fresh `binaryen` outside the wasm-pack pipeline if we want the
-# size win — for now, raw rustc release is what we ship for testing.
+# size win. For now, raw rustc release is what we ship for testing.
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
 
@@ -25,7 +25,7 @@ spine-core = { path = "../spine-core" }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 
 # wasm-bindgen is the only wasm-specific dep. It does not exist on native
-# builds — the rlib still compiles for `cargo test` so we can sanity-check
+# builds; the rlib still compiles for `cargo test` so we can sanity-check
 # the JSON envelope shape without spinning up wasm-pack.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

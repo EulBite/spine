@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Eul Bite
 //
 // Operational seeder. NOT distributed. Runs on an airgapped machine
-// during Phase 2 of the playground rollout. See OPERATIONAL.md for
+// to seed the playground demo. See OPERATIONAL.md for
 // the exact procedure.
 
 mod scenario;

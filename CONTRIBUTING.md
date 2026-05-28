@@ -11,7 +11,7 @@ issue first.
 ## Project shape (so you know where to land)
 
 ```
-spine-core/        Pure verification library — the source of truth.
+spine-core/        Pure verification library: the source of truth.
                    No filesystem, no network, no signing. Compiles for
                    native and wasm32 targets alike. This is where
                    substantive crypto changes go.
@@ -26,7 +26,7 @@ test-vectors/      Cross-language fixtures. Authoritative for canonical
                    JSON, entry hashing, and Ed25519 signature parity.
 playground-spec/   Integration contract for any host page that mounts
                    the playground. React skeleton + flow diagram +
-                   manifest example + Phase 5 build pipeline.
+                   manifest example + build pipeline.
 demo-seeder/       Operational tool for generating the signed demo WAL
                    on an airgapped machine. Excluded from the workspace
                    so its `rand` deps cannot reach the verifier crates'
@@ -48,9 +48,9 @@ Cross-cutting rules:
 
 Prerequisites:
 
-- Rust toolchain — `rustc 1.75` or newer (the workspace pins this
+- Rust toolchain: `rustc 1.75` or newer (the workspace pins this
   via `rust-version` in `spine-cli/Cargo.toml`).
-- The `wasm32-unknown-unknown` target — `rustup target add
+- The `wasm32-unknown-unknown` target: `rustup target add
   wasm32-unknown-unknown`. Required for the non-regression check
   on `spine-core`'s wasm build.
 - For the cross-target gate (`spine-wasm/tests/integration.mjs`)
@@ -60,7 +60,7 @@ Prerequisites:
 The minimum gate every change must pass before merge:
 
 ```sh
-cargo test --workspace                    # 115/115 pass
+cargo test --workspace                    # 114/114 pass
 cargo clippy --workspace --all-targets    # zero warnings
 cargo build --target wasm32-unknown-unknown -p spine-core --release
                                           # clean wasm32 build
@@ -111,7 +111,7 @@ sha256sum spine-wasm/pkg/spine_wasm_bg.wasm   # must match
   reader.
 - Don't add module-level "module overview" comments unless the
   module's purpose is non-obvious. The structure is documented
-  in the README and PLAN.md; per-module commentary should focus
+  in the README; per-module commentary should focus
   on contracts and invariants the rest of the crate depends on.
 
 ## Commit conventions
@@ -125,7 +125,7 @@ sha256sum spine-wasm/pkg/spine_wasm_bg.wasm   # must match
 - For changes that touch crypto contracts, signature schemes, or
   the canonical-JSON subset, include a one-line verification
   block in the body listing the test commands you ran and their
-  results (`115/115 pass`, `wasm32 build clean`, etc.).
+  results (`114/114 pass`, `wasm32 build clean`, etc.).
 - No `Co-Authored-By:` lines unless every named co-author has
   consented. AI tools are not co-authors by default.
 
@@ -149,7 +149,7 @@ sha256sum spine-wasm/pkg/spine_wasm_bg.wasm   # must match
 Rust, Node, and Python implementations and asserted byte-equal in
 each. Do not change a vector unless you have:
 
-1. Identified what the vector currently asserts and *why* — read
+1. Identified what the vector currently asserts and *why*: read
    the existing case's `description` and the surrounding context.
 2. Updated all three implementations to produce the new value, or
    confirmed by running them that the new value is correct on each.
@@ -164,13 +164,13 @@ expected value to match is a regression in disguise.
 By contributing you agree that your contribution is licensed
 under the [Apache License 2.0](LICENSE), the same license the
 rest of this repository ships under. We use the Developer
-Certificate of Origin (DCO) — sign commits with `git commit -s`.
+Certificate of Origin (DCO): sign commits with `git commit -s`.
 A `Signed-off-by:` line attests that you have the right to
 contribute the code under the project's licence.
 
 ## Reporting security issues
 
-Security issues go through a separate process — see
+Security issues go through a separate process. See
 [SECURITY.md](SECURITY.md). Please do not open a public issue or
 PR for a vulnerability until it has been disclosed and patched.
 
@@ -179,6 +179,6 @@ PR for a vulnerability until it has been disclosed and patched.
 For usage questions or design discussion, open a GitHub issue
 with the `question` or `discussion` label. For substantive design
 proposals (new verifier invariants, schema bumps, contract
-changes), open an issue first and link to the PR — code-only PRs
+changes), open an issue first and link to the PR. Code-only PRs
 that change a contract without prior discussion will be closed
 with a request to open the design issue first.

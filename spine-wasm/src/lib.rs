@@ -44,10 +44,13 @@ use spine_core::{
     verify_demo_wal, verify_wal_bytes, verify_wal_bytes_with_options, LenientOptions,
 };
 
-/// JS-callable strict verifier. Returns a JSON string with shape
+/// JS-callable strict verifier.
+///
+/// Returns a JSON string with shape
 /// `{ "ok": true, "report": <DemoReport> }`. The report itself
 /// carries `status` ("valid", "invalid", "error") so the JS side
 /// branches on it without parsing the human-readable error message.
+#[must_use]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn verify_demo_wal_json(
     wal_bytes: &[u8],
@@ -70,6 +73,11 @@ pub fn verify_demo_wal_json(
 /// passes either the 64-char hex string or an empty value, and the
 /// empty case is treated as "no expected root" with a warning in the
 /// resulting report.
+// `expected_root_hex` is taken by value because wasm-bindgen marshals a
+// JS `string | undefined` argument into an owned `Option<String>`; a
+// borrowed `Option<&str>` is not expressible across that ABI.
+#[must_use]
+#[allow(clippy::needless_pass_by_value)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn verify_wal_bytes_json(wal_bytes: &[u8], expected_root_hex: Option<String>) -> String {
     let trimmed = expected_root_hex.as_deref().and_then(|s| {
@@ -80,8 +88,9 @@ pub fn verify_wal_bytes_json(wal_bytes: &[u8], expected_root_hex: Option<String>
             Some(t.to_string())
         }
     });
-    let report = match trimmed.as_deref() {
-        Some(root) => {
+    let report = trimmed.as_deref().map_or_else(
+        || verify_wal_bytes(wal_bytes),
+        |root| {
             let opts = LenientOptions {
                 expected_root: Some(root),
                 keystore: None,
@@ -89,9 +98,8 @@ pub fn verify_wal_bytes_json(wal_bytes: &[u8], expected_root_hex: Option<String>
                 trusted_pubkey: None,
             };
             verify_wal_bytes_with_options(wal_bytes, &opts)
-        }
-        None => verify_wal_bytes(wal_bytes),
-    };
+        },
+    );
     serialize_envelope(&serde_json::to_string(&report))
 }
 
@@ -111,6 +119,7 @@ fn serialize_envelope(inner: &Result<String, serde_json::Error>) -> String {
 }
 
 fn escape_json_string(s: &str) -> String {
+    use std::fmt::Write as _;
     // Minimal JSON string escaper for the fallback path. Production
     // strings flow through serde_json::to_string and never touch
     // this helper.
@@ -122,7 +131,10 @@ fn escape_json_string(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if (c as u32) < 0x20 => {
+                // Writing into a String is infallible.
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
             c => out.push(c),
         }
     }

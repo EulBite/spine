@@ -8,7 +8,7 @@ publish = false
 
 # This crate is intentionally OUTSIDE the workspace at spine-public/Cargo.toml.
 # It pulls in `rand`, `rand_chacha`, and `ed25519-dalek` with the `rand_core`
-# feature — banned from `spine-core` and `spine-cli`. Treating it as a
+# feature, banned from `spine-core` and `spine-cli`. Treating it as a
 # separate crate prevents accidental contamination of the verifier crates'
 # wasm32 dependency graph and keeps `cargo build --workspace` fast.
 

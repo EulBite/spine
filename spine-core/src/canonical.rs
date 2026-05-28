@@ -8,7 +8,7 @@
 //! rules enforced by the Node SDK's `canonical.ts`. The strict
 //! verifier recomputes `payload_hash` from this canonical form, so
 //! any divergence from the Node implementation is a credibility-
-//! ending bug — that is why this module is small, audited carefully,
+//! ending bug, which is why this module is small, audited carefully,
 //! and pinned by cross-language test vectors in
 //! `test-vectors/vectors.json` that both implementations regenerate
 //! independently.
@@ -22,10 +22,10 @@
 //!   point. Matches `String(integer)` in JavaScript.
 //! - **Booleans**: `true` / `false`.
 //! - **Null**: `null`.
-//! - **Arrays**: `[item1,item2,…]` — no whitespace.
+//! - **Arrays**: `[item1,item2,…]`, no whitespace.
 //! - **Objects**: keys NFC-normalized, then sorted by **UTF-16 code unit
 //!   order** (matches `Array.prototype.sort()` in JS), serialized as
-//!   `{"k1":v1,"k2":v2,…}` — no whitespace.
+//!   `{"k1":v1,"k2":v2,…}`, no whitespace.
 //!
 //! Floats are **not** supported. A value that is a finite non-integer number
 //! returns [`CanonicalError::NonIntegerNumber`]. NaN / Infinity cannot occur
@@ -143,6 +143,9 @@ fn write_number(n: &serde_json::Number, out: &mut Vec<u8>) -> Result<(), Canonic
         if f.is_finite() && f.fract() == 0.0 {
             // `f as i64` saturates at i64::MIN/MAX for out-of-range inputs,
             // matching the lossy precision JS already accepted at parse time.
+            // The truncation is the intended behavior, not a bug, so the
+            // pedantic lint is silenced explicitly here.
+            #[allow(clippy::cast_possible_truncation)]
             let as_int = f as i64;
             out.extend_from_slice(as_int.to_string().as_bytes());
             return Ok(());
@@ -154,7 +157,7 @@ fn write_number(n: &serde_json::Number, out: &mut Vec<u8>) -> Result<(), Canonic
 /// Serialize a string with NFC normalization and RFC 8259 escapes.
 ///
 /// Reuses serde_json's escaping (which matches JavaScript's `JSON.stringify`
-/// for this subset — no escape of forward slash, no `\u` for non-ASCII).
+/// for this subset: no escape of forward slash, no `\u` for non-ASCII).
 /// In practice the inner serialization can never fail (Vec<u8> is an
 /// infallible sink and a String is always valid UTF-8), but we propagate
 /// the error rather than `expect()` so the no-panic guarantee on
@@ -303,7 +306,7 @@ mod tests {
 
     #[test]
     fn deep_nesting_does_not_overflow() {
-        // 50 levels of nesting — well within practical limits, well below
+        // 50 levels of nesting, well within practical limits, well below
         // anything that would blow the stack on default settings.
         let mut v = json!(0);
         for _ in 0..50 {
@@ -395,7 +398,7 @@ mod tests {
     fn duplicate_keys_in_input_resolve_to_last_wins() {
         // serde_json's default Map behaviour: later occurrence overwrites.
         // RFC 8785 forbids duplicate keys in inputs, but enforcement is the
-        // caller's responsibility — we match Node SDK (which also relies on
+        // caller's responsibility; we match Node SDK (which also relies on
         // Object.entries behaviour) for predictability.
         let input = r#"{"a":1,"a":2}"#;
         let result = canonical_json_from_bytes(input.as_bytes()).unwrap();

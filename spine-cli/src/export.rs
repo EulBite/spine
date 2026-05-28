@@ -142,7 +142,7 @@ pub fn run(
     syslog_facility: u8,
     format: OutputFormat,
 ) -> Result<bool, ExportCmdError> {
-    run_with_args(ExportArgs {
+    run_with_args(&ExportArgs {
         wal_path,
         output_path,
         export_format,
@@ -154,8 +154,8 @@ pub fn run(
     })
 }
 
-fn run_with_args(args: ExportArgs<'_>) -> Result<bool, ExportCmdError> {
-    let ExportArgs {
+fn run_with_args(args: &ExportArgs<'_>) -> Result<bool, ExportCmdError> {
+    let &ExportArgs {
         wal_path,
         output_path,
         export_format,
@@ -257,11 +257,8 @@ fn run_with_args(args: ExportArgs<'_>) -> Result<bool, ExportCmdError> {
             "  filtered_export_digest: {}",
             manifest.filtered_export_digest
         );
-        if output_path.is_some() {
-            eprintln!(
-                "  manifest sidecar:       {}",
-                sidecar_path(output_path.unwrap_or(Path::new(""))).display()
-            );
+        if let Some(p) = output_path {
+            eprintln!("  manifest sidecar:       {}", sidecar_path(p).display());
         }
     }
     Ok(true)
@@ -292,7 +289,7 @@ fn parse_filter(input: Option<&str>) -> Result<Option<i64>, ExportCmdError> {
     }
 }
 
-fn filter_keeps(entry: &WalEntry, from_ns: Option<i64>, to_ns: Option<i64>) -> bool {
+const fn filter_keeps(entry: &WalEntry, from_ns: Option<i64>, to_ns: Option<i64>) -> bool {
     if let Some(f) = from_ns {
         if entry.timestamp_ns < f {
             return false;
@@ -345,13 +342,13 @@ fn tmp_for(final_path: &Path) -> PathBuf {
 impl Sink {
     fn commit(self) -> Result<(), ExportCmdError> {
         match self {
-            Sink::Stdout(_) => std::io::stdout()
+            Self::Stdout(_) => std::io::stdout()
                 .flush()
                 .map_err(|e| ExportCmdError::Write {
                     path: "<stdout>".to_string(),
                     source: e,
                 }),
-            Sink::File(FileSink {
+            Self::File(FileSink {
                 final_path,
                 tmp_path,
                 writer,
@@ -367,11 +364,11 @@ impl Sink {
                     source: e,
                 })
             }
-            Sink::CsvStdout(mut w) => w.flush().map_err(|e| ExportCmdError::Write {
+            Self::CsvStdout(mut w) => w.flush().map_err(|e| ExportCmdError::Write {
                 path: "<stdout>".to_string(),
                 source: e,
             }),
-            Sink::CsvFile(CsvFileSink {
+            Self::CsvFile(CsvFileSink {
                 final_path,
                 tmp_path,
                 mut writer,
@@ -397,7 +394,7 @@ fn open_sink(output: Option<&Path>, fmt: ExportFormat) -> Result<Sink, ExportCmd
     match (fmt, output) {
         (ExportFormat::Jsonl, None) => Ok(Sink::Stdout(StdoutFlavour::Plain)),
         (ExportFormat::Syslog, None) => Ok(Sink::Stdout(StdoutFlavour::Syslog)),
-        (ExportFormat::Jsonl, Some(p)) | (ExportFormat::Syslog, Some(p)) => {
+        (ExportFormat::Jsonl | ExportFormat::Syslog, Some(p)) => {
             let tmp = tmp_for(p);
             let f = File::create(&tmp).map_err(|e| ExportCmdError::Write {
                 path: tmp.display().to_string(),
@@ -527,13 +524,14 @@ fn write_csv_record<W: Write>(
 
 fn format_syslog(entry: &WalEntry, facility: u8) -> String {
     // Priority = facility * 8 + severity. Severity = 6 (info).
-    let priority = (facility as u16) * 8 + 6;
-    let ts = DateTime::<Utc>::from_timestamp(
-        entry.timestamp_ns.div_euclid(1_000_000_000),
-        (entry.timestamp_ns.rem_euclid(1_000_000_000)) as u32,
-    )
-    .map(|dt| dt.to_rfc3339())
-    .unwrap_or_else(|| format!("ns:{}", entry.timestamp_ns));
+    let priority = u16::from(facility) * 8 + 6;
+    let secs = entry.timestamp_ns.div_euclid(1_000_000_000);
+    // `rem_euclid(1_000_000_000)` is always in `0..1_000_000_000`, which
+    // fits a u32, so the truncation can never lose information.
+    #[allow(clippy::cast_possible_truncation)]
+    let sub_nanos = entry.timestamp_ns.rem_euclid(1_000_000_000) as u32;
+    let ts = DateTime::<Utc>::from_timestamp(secs, sub_nanos)
+        .map_or_else(|| format!("ns:{}", entry.timestamp_ns), |dt| dt.to_rfc3339());
     let event_type = entry.event_type.as_deref().unwrap_or("-");
     let source = entry.source.as_deref().unwrap_or("-");
     let hash_short: String = entry.payload_hash.chars().take(16).collect();
@@ -572,7 +570,7 @@ fn syslog_token(s: &str) -> String {
 
 /// Escape `"` and `\` for values that land inside the quoted MSG
 /// portion. RFC 3164 / 5424 do not specify escaping; this matches
-/// the convention most SIEMs (Splunk, ELK, QRadar) accept.
+/// the convention most SIEMs (Splunk, ELK, `QRadar`) accept.
 fn syslog_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

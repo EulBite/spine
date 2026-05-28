@@ -9,7 +9,7 @@
 //! models, but they sit on top of the SAME chain primitive. If a
 //! future change shifts one side without the other, both verifiers
 //! still produce a "chain root" each, but the two values silently
-//! diverge — and "verify" the same WAL into different states. That
+//! diverge, and "verify" the same WAL into different states. That
 //! is a credibility-ending bug class for a product whose pitch is
 //! "the verifier in your browser is the same verifier as the CLI".
 //!

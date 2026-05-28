@@ -118,8 +118,7 @@ fn print_text_report(result: &VerificationResult) {
         for err in &result.errors {
             let seq = err
                 .sequence
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "-".to_string());
+                .map_or_else(|| "-".to_string(), |s| s.to_string());
             println!("  [seq {seq}] {}: {}", err.error_type, err.details);
         }
     }

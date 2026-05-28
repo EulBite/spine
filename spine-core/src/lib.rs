@@ -9,12 +9,12 @@
 //! verifier surfaces, and downstream consumers MUST pick the one that
 //! matches their threat model:
 //!
-//! * [`verify::verify_wal_bytes`] — lenient. Tolerates unsigned
+//! * [`verify::verify_wal_bytes`]: lenient. Tolerates unsigned
 //!   records, treats `expected_root` as optional, accumulates errors,
 //!   trusts the `public_key` declared in each entry. Use for offline
 //!   auditing of production WAL files where some records pre-date the
 //!   signing rollout.
-//! * [`verify_demo::verify_demo_wal`] — strict. Refuses unsigned
+//! * [`verify_demo::verify_demo_wal`]: strict. Refuses unsigned
 //!   records, pins the `expected_pubkey` from outside, requires
 //!   `expected_root` non-optional, recomputes `payload_hash` from the
 //!   canonical JSON of `payload`, prepends a domain-separation tag
