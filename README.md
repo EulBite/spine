@@ -2,6 +2,12 @@
 
 Cryptographically verifiable audit evidence: independent verification tools.
 
+An audit log is only as trustworthy as the system that writes it: whoever
+controls that system can edit, delete, or reorder past entries after the
+fact. Spine makes such tampering detectable. Each event is hash-chained and
+signed, so the integrity of a log can be checked independently and offline,
+by anyone, without trusting the system that produced it.
+
 This repository contains the Apache-2.0 licensed components of
 [Spine](https://eulbite.com): the core verification library, the
 standalone CLI for offline auditors, and the WebAssembly build that
@@ -10,9 +16,10 @@ powers an in-browser verification playground.
 The Spine production server (event ingestion, batch sealing,
 retention, dashboard) is not part of this repository. The components
 here are designed so that the same verification logic that backs the
-production system also runs, byte-for-byte, in your browser and in
-the standalone CLI. Anyone can audit the verifier source and run it
-offline against a WAL file without trusting any Spine infrastructure.
+production system also runs in your browser and in the standalone CLI,
+producing byte-for-byte identical results on the same input. Anyone can
+audit the verifier source and run it offline against a WAL file without
+trusting any Spine infrastructure.
 
 ## Status
 
