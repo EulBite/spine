@@ -127,8 +127,9 @@ fn main() -> Result<()> {
     fs::write(&manifest_path, format!("{manifest}\n"))
         .with_context(|| format!("write {}", manifest_path.display()))?;
 
-    // Private key handling: print to stdout ONCE, between two [Enter]
-    // prompts, so the operator copies it onto paper or a hardware
+    // Private key handling: print to stderr ONCE, between two [Enter]
+    // prompts (stderr so a piped stdout capture never receives the
+    // secret), so the operator copies it onto paper or a hardware
     // vault. NEVER written to disk: a hex file in the output dir is
     // a foot-gun (gets copied with the other artefacts, ends up in
     // backups, screen-recordings, version control). Wrapped in
@@ -159,7 +160,7 @@ fn main() -> Result<()> {
         // key. Anyone running the same seed gets the same key; no
         // value in surfacing it to test logs.
     } else {
-        // PRODUCTION PATH: stdout disclosure between two [Enter]
+        // PRODUCTION PATH: stderr disclosure between two [Enter]
         // prompts. Operator must capture the hex onto paper or a
         // hardware vault before pressing Enter the second time;
         // after that, the SigningKey's memory copy is dropped and

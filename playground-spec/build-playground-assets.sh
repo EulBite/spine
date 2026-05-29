@@ -11,8 +11,8 @@
 #                      demo-manifest.json}
 #     Produced by the airgapped seeding run, transferred onto this
 #     machine via clean USB. Must have schema_version=1 and the
-#     placeholder strings TODO_FILLED_BY_BUILD for wal_sha256 /
-#     wasm_sha256 / wasm_url.
+#     placeholder string REPLACE_WITH_SHA256 for wal_url, wal_sha256,
+#     wasm_url, wasm_sha256, and js_sha256.
 #
 #   - spine-wasm/ source tree.
 #

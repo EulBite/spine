@@ -120,6 +120,21 @@ fn verify_valid_wal_reports_valid_json() {
 }
 
 #[test]
+fn verify_valid_wal_text_format_renders_human_report() {
+    // The text rendering is the terminal-only path with no structured
+    // consumer, so a JSON-only suite would never exercise it. Assert
+    // its key lines so the human report cannot silently regress.
+    let dir = wal_dir();
+    let out = run(&["verify", "--wal", path_str(dir.path()), "--format", "text"]);
+    assert_eq!(code(&out), 0);
+
+    let text = stdout(&out);
+    assert!(text.contains("Status: VALID"), "text report shows status");
+    assert!(text.contains("Events verified:"), "text report shows event count");
+    assert!(text.contains("Chain root:"), "text report shows chain root");
+}
+
+#[test]
 fn verify_expected_root_gates_on_match() {
     let dir = wal_dir();
 

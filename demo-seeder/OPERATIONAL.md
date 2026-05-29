@@ -22,11 +22,12 @@ Four files in `--output-dir` (default: current directory):
 - `demo.pubkey`: 64-char lowercase hex of the Ed25519 verifying key.
 - `demo.expected_root`: 64-char lowercase hex of the BLAKE3 chain root.
 - `demo-manifest.json`: playground manifest skeleton with the pinned
-  crypto values filled in. `wal_sha256` / `wasm_sha256` / `wasm_url` are
-  left as `TODO_FILLED_BY_BUILD` placeholders for the build pipeline
-  to fill in once the wasm bundle and WAL hash are known.
+  crypto values filled in. `wal_url`, `wal_sha256`, `wasm_url`,
+  `wasm_sha256`, and `js_sha256` are left as `REPLACE_WITH_SHA256`
+  placeholders for the build pipeline to fill in once the wasm bundle
+  and WAL hash are known.
 
-The **private key** is printed once on stdout, in red, between two
+The **private key** is printed once on stderr, in red, between two
 `[Enter]` prompts, and never written to disk. Capture it manually onto
 paper or a hardware vault. If you lose it, the demo WAL becomes immutable:
 you can verify it forever, but you can never re-sign or extend it.
@@ -92,7 +93,7 @@ anything in.
 2. Run the seeder:
 
    ```sh
-   /path/to/usb-binary/demo-seeder --records 20 --output-dir ./out
+   /path/to/usb-binary/demo-seeder --output-dir ./out
    ```
 
    No `--deterministic-seed` flag: the production run uses `OsRng`. The
@@ -158,7 +159,7 @@ anything in.
 
    The hosting build is responsible for hashing `demo.jsonl` into
    `wal_sha256` and the wasm bundle into `wasm_sha256`, replacing the
-   `TODO_FILLED_BY_BUILD` placeholders in `demo-manifest.json`, and
+   `REPLACE_WITH_SHA256` placeholders in `demo-manifest.json`, and
    pinning the manifest in 3+ independent locations.
 
 4. Wipe the transfer USB stick (full overwrite, not just delete).
@@ -195,5 +196,5 @@ anything in.
 `--deterministic-seed <u64>` replaces `OsRng` with a ChaCha20-seeded
 RNG. Output is byte-for-byte reproducible across runs of the same seed.
 Useful for CI and regression tests; **fatal in production**, because the
-private key has zero entropy. The flag is hidden from `--help`. Anyone
-reaching for it should already know what they are doing.
+private key has zero entropy. Use it only in tests; a production run must
+omit it so the key is drawn from `OsRng`.

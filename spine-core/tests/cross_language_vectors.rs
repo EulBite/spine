@@ -5,9 +5,9 @@
 //!
 //! Loads `../test-vectors/vectors.json` and asserts that the Rust
 //! implementation reproduces every pinned value. Any divergence here
-//! means a downstream re-implementation (Node SDK, Go client, in-house
-//! verifier) that follows the README will disagree with Rust, which is
-//! a credibility-ending bug for the "single source of truth" pitch.
+//! means an independent re-implementation that follows the README would
+//! disagree with Rust, which is a credibility-ending bug for the
+//! "single source of truth" pitch.
 //!
 //! Re-generate the file via
 //! `cargo run --example gen_fixture -- --output ../test-vectors/vectors.json`

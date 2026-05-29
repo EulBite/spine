@@ -23,7 +23,7 @@
 //! | Code | Meaning |
 //! |------|---------|
 //! | 0    | Subcommand reported success (`verify`: `valid=true`, `inspect`/`export`: produced output). |
-//! | 1    | Subcommand completed but reported issues (`verify`: `valid=false`, `inspect`: not found, `export`: nothing exported when something was expected). |
+//! | 1    | Subcommand completed but reported issues (`verify`: `valid=false`, `inspect`: lookup not found). |
 //! | 2    | I/O or argument error; the subcommand could not run. |
 //!
 //! CI gates should treat exit `0` as pass and any other code as fail.
@@ -35,6 +35,12 @@
 //! output we always emit JSON so downstream tools can parse it. Use
 //! `--format json --output file.json` if you want to make the choice
 //! explicit.
+
+// warn, not deny: a CLI may legitimately panic on hostile local input,
+// but every unwrap/expect site should be a deliberate, reviewed choice
+// rather than a reflex. spine-core (the crypto) stays on deny.
+#![warn(clippy::unwrap_used)]
+#![warn(clippy::expect_used)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;

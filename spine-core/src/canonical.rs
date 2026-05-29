@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Eul Bite
 
-//! Canonical JSON serialization, byte-for-byte compatible with the
-//! Spine Node SDK.
+//! Canonical JSON serialization for the strict verifier.
 //!
-//! This is a deliberate **subset** of RFC 8785 (JCS) that matches the
-//! rules enforced by the Node SDK's `canonical.ts`. The strict
-//! verifier recomputes `payload_hash` from this canonical form, so
-//! any divergence from the Node implementation is a credibility-
-//! ending bug, which is why this module is small, audited carefully,
-//! and pinned by cross-language test vectors in
-//! `test-vectors/vectors.json` that both implementations regenerate
-//! independently.
+//! A deliberate **subset** of RFC 8785 (JCS). The strict verifier
+//! recomputes `payload_hash` from this canonical form, so the emitted
+//! byte sequence is a cryptographic contract: any drift changes a hash
+//! and breaks verification. That is why the module is small, audited
+//! carefully, and pinned by the cross-language test vectors in
+//! `test-vectors/vectors.json`, which any independent implementation
+//! must reproduce byte-for-byte.
 //!
 //! ## Supported subset
 //!
 //! - **Strings**: escaped per RFC 8259 (matches `JSON.stringify`); content is
 //!   normalized to **Unicode NFC** before serialization.
-//! - **Integers** in `i64` range, plus `u64` values that still fit `i64`.
+//! - **Integers** in `i64` range, plus `u64` values above `i64::MAX`.
 //!   Output: decimal digits, no leading sign for non-negative, no decimal
 //!   point. Matches `String(integer)` in JavaScript.
 //! - **Booleans**: `true` / `false`.
@@ -27,12 +25,14 @@
 //!   order** (matches `Array.prototype.sort()` in JS), serialized as
 //!   `{"k1":v1,"k2":v2,…}`, no whitespace.
 //!
-//! Floats are **not** supported. A value that is a finite non-integer number
-//! returns [`CanonicalError::NonIntegerNumber`]. NaN / Infinity cannot occur
-//! because `serde_json::Value::Number` rejects them at parse time. This is
-//! intentional: the demo WAL encodes monetary amounts as strings (e.g.
-//! `"amount": "100.00"`), sidestepping ECMA-262 `NumberToString` quirks
-//! entirely.
+//! Numbers must be integer-valued. A JSON float with a whole value such
+//! as `2.0` or `-0` is accepted and serialized without a decimal point
+//! (matching `Number.isInteger`); only a finite non-integer number is
+//! rejected with [`CanonicalError::NonIntegerNumber`]. NaN / Infinity
+//! cannot occur because `serde_json::Value::Number` rejects them at parse
+//! time. This is intentional: the demo WAL encodes monetary amounts as
+//! strings (e.g. `"amount": "100.00"`), sidestepping ECMA-262
+//! `NumberToString` quirks entirely.
 //!
 //! ## Subtlety: UTF-16 vs UTF-8 key ordering
 //!
@@ -398,8 +398,8 @@ mod tests {
     fn duplicate_keys_in_input_resolve_to_last_wins() {
         // serde_json's default Map behaviour: later occurrence overwrites.
         // RFC 8785 forbids duplicate keys in inputs, but enforcement is the
-        // caller's responsibility; we match Node SDK (which also relies on
-        // Object.entries behaviour) for predictability.
+        // caller's responsibility; we match JavaScript's `JSON.parse`
+        // last-wins behaviour for predictability.
         let input = r#"{"a":1,"a":2}"#;
         let result = canonical_json_from_bytes(input.as_bytes()).unwrap();
         assert_eq!(String::from_utf8(result).unwrap(), r#"{"a":2}"#);

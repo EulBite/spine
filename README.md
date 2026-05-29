@@ -17,7 +17,7 @@ offline against a WAL file without trusting any Spine infrastructure.
 ## Status
 
 Pre-release. The verifier crates and the wasm bundle are stable and
-covered by cross-language regression vectors. The browser playground
+covered by regression vectors. The browser playground
 is wired up via [`playground-spec/`](playground-spec/) and pending
 deployment.
 
@@ -29,8 +29,9 @@ spine-core/        Pure verification library: hash chain, signature verify,
                    just pure logic suitable for native and wasm targets alike.
 spine-cli/         Standalone CLI for offline WAL verification.
 spine-wasm/        wasm-bindgen façade over spine-core for browser use.
-test-vectors/      Cross-language test vectors. Verifying these guarantees
-                   parity across the Rust, Node, and Python implementations.
+test-vectors/      Language-independent reference vectors pinning canonical
+                   JSON, hashing, and the signature contracts. The Rust crates
+                   are checked against them; any implementation must match.
 playground-spec/   Integration contract for any host site that wants to
                    embed the in-browser playground.
 demo-seeder/       Operational tool: generates a signed demo WAL on an

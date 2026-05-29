@@ -1,9 +1,8 @@
 # Spine Test Vectors
 
-Cross-language test vectors for implementations of the Spine WAL
-verifier. Any client (Rust, Node, Python, Go, ...) that intends to
-talk to the public Spine envelope MUST reproduce every value listed
-in `vectors.json` exactly.
+Language-independent test vectors for the Spine WAL verifier. Any
+implementation that intends to talk to the public Spine envelope MUST
+reproduce every value listed in `vectors.json` exactly.
 
 The vectors are the regression net for the four primitives the
 verifier stack depends on: canonical JSON, the chain-link entry
@@ -18,8 +17,9 @@ Spine ships two verifiers with deliberately different threat models:
 
 - **Lenient verifier** (`spine-core::verify_wal_bytes`). Used by the
   standalone CLI auditor on production WAL files. Tolerates unsigned
-  records, treats `expected_root` as optional, no external public-key
-  pinning.
+  records, treats `expected_root` as optional, and does not require
+  external public-key pinning (an optional `trusted_pubkey` pin is
+  available but off by default).
 - **Strict demo verifier** (`spine-core::verify_demo_wal`). Used by
   the public WASM playground. Requires every record signed, an
   externally pinned public key, a mandatory `expected_root`, and a
@@ -111,8 +111,9 @@ presence(Some(s))      = b"\x01" || s.as_utf8_bytes()
 ```
 
 `entry_hash_raw` is 32 raw bytes. The hex form (64 chars lowercase)
-is what gets stored as the next record's `prev_hash` field and as
-the report's `chain_root`.
+is what gets stored as the next record's `prev_hash` field, and is
+the per-record input the `chain_root` accumulator hashes over (§7).
+It is not itself the `chain_root`.
 
 The presence byte distinguishes `None` from `Some("")` so a producer
 cannot flip the two without changing the digest. A regression that
@@ -206,7 +207,7 @@ Your implementation matches the spec if, for every case in
 2. `BLAKE3(canonical_json)` equals `case.expected_payload_hash`
 3. `compute_entry_hash_raw(...)` equals the raw bytes of
    `case.expected_entry_hash`
-4. `compute_entry_hash_for_signing_raw(...)` equals
+4. `compute_entry_hash_for_signing_raw(...)` equals the raw bytes of
    `case.expected_sign_hash`
 5. `receipt_canonical_message(...)` matches
    `case.expected_canonical_message_hex` byte-for-byte

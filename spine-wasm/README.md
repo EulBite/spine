@@ -23,27 +23,41 @@ function verify_demo_wal_json(
 function verify_wal_bytes_json(
     wal_bytes: Uint8Array,
     expected_root_hex: string | null,
-    fail_fast: boolean,
 ): string;                          // JSON envelope (see below)
 ```
 
-Both return a JSON string with one of two shapes:
+Both return a JSON string. Once the wasm crate has parsed its inputs the
+envelope is always:
 
 ```jsonc
-// Happy path
-{ "ok": true, "report": { /* DemoVerifyReport or VerifyReport */ } }
-
-// Structural error (the verifier could not even attempt verification)
-{ "ok": false, "error": { "kind": "EmptyWal", "message": "..." } }
+{ "ok": true, "report": { /* DemoReport or VerificationResult */ } }
 ```
 
-`error.kind` is a stable enum of strings (one per typed-error variant) so
-the JS callsite can branch on it without parsing the human `message`.
+`ok` is `false` only when serializing the report itself fails; this is
+an internal `spine-core` bug, effectively unreachable:
 
-When `ok: true`, the report itself carries the verdict in `report.status`
-(`"valid"` or `"invalid"`). A "valid envelope, invalid report" outcome
-means the verifier ran end-to-end but the WAL did not pass. That is the
-common failure shape the playground UI should render.
+```jsonc
+{ "ok": false, "error": { "kind": "ReportSerializationFailed", "message": "..." } }
+```
+
+`ReportSerializationFailed` is currently the only `ok:false` kind. There
+is **no** envelope-level error for bad input (empty WAL, malformed
+pubkey, …): those surface inside the report, not as `ok:false`.
+
+When `ok: true`, the verdict lives inside the report:
+
+- Strict (`verify_demo_wal_json`) → `report.status`: `"valid"`,
+  `"invalid"`, or `"error"`. `"invalid"` covers tampering, chain-root
+  mismatch, and an empty WAL that cannot match the pinned root.
+  `"error"` is a caller-side configuration problem caught before chain
+  replay (malformed `expected_pubkey` or `expected_root`), with the
+  detail in `report.error`.
+- Lenient (`verify_wal_bytes_json`) → `report.valid` (boolean), with
+  failures listed in `report.errors`.
+
+A "valid envelope, failed report" outcome means the verifier ran
+end-to-end but the WAL did not pass. That is the common failure shape
+the playground UI should render.
 
 ## Building the bundle
 
@@ -84,17 +98,22 @@ node spine-wasm/tests/integration.mjs
 The script asserts:
 
 - Strict verifier on the fixture: `status=valid`, `events_verified=20`,
-  `chain_root_computed` matches the pinned `expected_root`, the report
-  carries the pubkey only as an 8-byte fingerprint.
-- Strict verifier on a 1-bit-flipped fixture: rejected (either
-  `status=invalid` or a `ParseError` envelope, depending on which byte
-  flips).
-- Strict verifier with a wrong pinned pubkey: `status=invalid`.
-- Strict verifier on an empty input: `ok=false`, `error.kind=EmptyWal`.
-- Lenient verifier on the same fixture: `valid=false` (different
-  signing contract, see the cross-API doc-comments) BUT
-  `chain_root` byte-for-byte equal to the strict one. This is the
-  cross-API parity guarantee surfaced through the wasm boundary.
+  `chain_root` matches the pinned `expected_root`.
+- Strict verifier on a tampered fixture (the demo flow: the amount in
+  record 11 is edited): `status=invalid`, and the failing record carries
+  `reason.kind=payload_hash_mismatch`.
+- Strict verifier with a wrong pinned pubkey: `status=invalid`, failing
+  record `outcome=rejected`, `reason.kind=pubkey_mismatch` (never a
+  signature-verification failure).
+- Strict verifier on an empty input: `ok=true`, `status=invalid`,
+  `events_verified=0`, and `report.error` contains "chain_root mismatch"
+  (the accumulator over zero records cannot match the pinned root).
+- Lenient verifier on the same fixture: `chain_root` byte-for-byte equal
+  to the strict one. This is the cross-API parity guarantee surfaced
+  through the wasm boundary. (The lenient verifier fails signature
+  verification on a strict-signed WAL by design; only the `chain_root`
+  is compared here.)
+- Determinism: two runs on the same input produce byte-identical JSON.
 
 If any check fails, **the bundle is not cleared for playground
 integration**.
@@ -102,8 +121,12 @@ integration**.
 ## Bundle size and determinism
 
 Raw release `.wasm` (pre-`wasm-pack`, post-`cargo build` only): around
-**410 KB** at the time of writing. After `wasm-pack` runs `wasm-opt -Oz`,
-expect **150-200 KB**, and around **80-110 KB** gzipped on the wire.
+**410 KB** at the time of writing. `wasm-pack` is configured with
+`wasm-opt = false` in `Cargo.toml` (its bundled binaryen is too old for
+recent rustc/wasm-bindgen output), so the bundle it emits is
+unoptimised. Running a fresh `wasm-opt -Oz` separately (which
+`build-playground-assets.sh` does when `wasm-opt` is on PATH) brings it
+to **150-200 KB**, and around **80-110 KB** gzipped on the wire.
 
 The strict verifier deliberately depends on `unicode-normalization`
 (NFC tables ~100 KB), `subtle`, `blake3`, `ed25519-dalek`, and

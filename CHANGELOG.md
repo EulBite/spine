@@ -40,8 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (JSONL/CSV/syslog), and `inspect` subcommands.
 - `spine-wasm`: WebAssembly facade exposing the strict and lenient verifiers to
   JavaScript.
-- `test-vectors`: cross-language vectors pinning canonical JSON, entry hashing,
-  and Ed25519 signature parity across implementations.
+- `test-vectors`: language-independent vectors pinning canonical JSON, entry
+  hashing, and Ed25519 signatures.
 - `playground-spec`: integration contract for embedding the in-browser
   verification playground.
 

@@ -81,6 +81,10 @@
 use blake3::Hasher;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::Serialize;
+// The trusted-pubkey pin is compared constant-time: the pin is a value
+// a remote caller may probe, and timing on a short-circuiting `==` would
+// leak how many leading bytes matched.
+use subtle::ConstantTimeEq;
 
 use crate::receipt::{verify_receipt_signature, Keystore, ReceiptError};
 use crate::wal_entry::{
@@ -287,7 +291,7 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
             (Some(sig_hex), Some(pk_hex)) => {
                 if let Some(ref pin) = trusted_pubkey_bytes {
                     match decode_hex_32(pk_hex) {
-                        Ok(pk_bytes) if &pk_bytes == pin => {}
+                        Ok(pk_bytes) if pk_bytes.ct_eq(pin).unwrap_u8() == 1 => {}
                         _ => {
                             let err = VerificationError {
                                 sequence: Some(entry.sequence),

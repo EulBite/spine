@@ -26,8 +26,8 @@ pub struct ScenarioRecord {
 /// The fixed 20-record banking narrative.
 ///
 /// Sequence numbers are implicit (1..=20, in the order returned). The
-/// timestamp_ns of record N is `BASE_TIMESTAMP_NS + (N - 1) * SECOND_NS`
-/// (see `seeder.rs`).
+/// timestamp_ns of record N is `BASE_TIMESTAMP_NS + (N - 1) * SECOND_NS`,
+/// stamped by `main.rs` so the fixture stays byte-reproducible.
 ///
 /// Editing this array changes the demo WAL produced by `demo-seeder` and
 /// therefore the manifest pinned in the playground. Don't touch it lightly.

@@ -39,9 +39,10 @@ The following components, when used as documented:
   - Memory safety / panic paths reachable from public APIs. The
     crate is `#![deny(clippy::unwrap_used)]` by policy; any
     documented public input that produces a panic is in scope.
-  - Cross-language fixture divergence (`test-vectors/vectors.json`):
-    a Rust vs. Node vs. Python disagreement on canonical JSON,
-    entry hash, or signature verification is a security report.
+  - Test-vector conformance (`test-vectors/vectors.json`): a case
+    where the verifier does not reproduce a pinned canonical-JSON,
+    entry-hash, or signature value. The vectors are the wire
+    contract; a divergence is a correctness bug.
 - **`spine-wasm`**: the WebAssembly façade.
   - The JS-callable surface (`verify_demo_wal_json`,
     `verify_wal_bytes_json`) and its JSON envelope.
@@ -76,9 +77,10 @@ These are **not** security issues against this repository:
   flows. None of that lives here.
 - Compliance certifications.
 - Misuse of the lenient `verify_wal_bytes` in a context that
-  required pinning. The lenient API is documented as policy-free;
-  using it where strict pinning is needed is a usage error, not a
-  vulnerability.
+  required pinning. The default lenient entry point is policy-free
+  (an opt-in `trusted_pubkey` pin and `expected_root` anchor exist
+  but are off by default); using the unpinned path where strict
+  pinning is needed is a usage error, not a vulnerability.
 - DoS reports against the lenient CLI auditor on adversarial
   inputs. The strict path has documented hard limits
   (`MAX_RECORDS_DEMO`, `MAX_PAYLOAD_BYTES`); the lenient path does
@@ -107,9 +109,9 @@ verifier that returns `valid:true` on a WAL that should be
 detected as tampered, or a verifier that fails to detect a
 specific class of tampering. Examples that would qualify:
 
-- A WAL whose canonical-JSON serialisation differs across the
-  Rust, Node, or Python implementations such that a payload-hash
-  check passes in one and fails in another.
+- A WAL whose canonical-JSON serialisation does not match the
+  pinned test vectors, so a payload-hash check passes when it
+  should fail (or fails when it should pass).
 - A signature scheme mismatch where bytes signed by the strict
   contract verify under the lenient one (or vice versa). The two
   contracts are namespaced by domain separator precisely to make

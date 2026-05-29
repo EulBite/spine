@@ -76,7 +76,9 @@ async function main() {
         );
         assertTrue(env.ok === true, 'envelope.ok must be true on happy path');
         assertEq(env.report.status, 'valid', 'happy path status');
-        assertTrue(env.report.events_verified > 0, 'happy path events_verified');
+        // Exact count, not just > 0: the fixture is the fixed 20-record
+        // banking scenario, and the published docs pin that number.
+        assertEq(env.report.events_verified, 20, 'happy path events_verified');
         assertEq(
             env.report.chain_root,
             expectedRoot,

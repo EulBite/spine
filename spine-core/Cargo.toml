@@ -10,8 +10,8 @@ repository.workspace = true
 default = []
 # Accept ISO 8601 string timestamps in WAL records (in addition to i64 nanoseconds).
 # Adds a chrono dependency. The native CLI enables this for compatibility with
-# WAL files produced by the Node SDK; the wasm playground does not need it
-# because the demo WAL is signed offline with i64 timestamps only.
+# producers that emit ISO 8601 string timestamps; the wasm playground does not
+# need it because the demo WAL is signed offline with i64 timestamps only.
 iso-timestamps = ["dep:chrono"]
 
 [dependencies]

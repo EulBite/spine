@@ -37,7 +37,7 @@
 //! `serde_json::to_string` writes them in that order, so the same
 //! [`Receipt`] produces identical bytes across platforms and rust
 //! versions. The cross-language vectors in `test-vectors/vectors.json`
-//! pin this contract against the Node SDK implementation.
+//! pin this contract so any independent implementation can reproduce it.
 //!
 //! ## Keystore
 //!
@@ -342,8 +342,7 @@ mod tests {
         // Pin the byte-for-byte shape. If a future refactor reorders
         // keys, drops the domain prefix, or changes the null encoding
         // of batch_id, every existing receipt signature stops
-        // verifying, and the cross-language vectors stop matching the
-        // Node SDK.
+        // verifying, and the cross-language vectors stop matching.
         let receipt = sample_receipt();
         let bytes = receipt_canonical_message(&receipt).unwrap();
         assert!(bytes.starts_with(RECEIPT_DOMAIN_SEP));

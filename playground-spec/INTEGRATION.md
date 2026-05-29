@@ -202,9 +202,10 @@ Run [`build-playground-assets.sh`](build-playground-assets.sh) on the
 build host. It:
 
 1. Builds the wasm bundle: `wasm-pack build --target web --release`
-2. SHA-256s `demo-seeder/out/demo.jsonl` and `pkg/spine_wasm_bg.wasm`
+2. SHA-256s `demo-seeder/out/demo.jsonl`, `pkg/spine_wasm_bg.wasm`,
+   and the wasm-bindgen glue `pkg/spine_wasm.js`
 3. Injects those digests into the manifest skeleton, replacing the
-   `TODO_FILLED_BY_BUILD` placeholders left by `demo-seeder`
+   `REPLACE_WITH_SHA256` placeholders left by `demo-seeder`
 4. Stages the four files (`spine_wasm.js`, `spine_wasm_bg.wasm`,
    `demo.jsonl`, `manifest.json`) in `playground-spec/dist/`
 5. Prints the next step: copy `dist/*` into the host site's
@@ -296,8 +297,9 @@ addressable independently:
 /playground/assets/demo-banking-<wal_sha256[:8]>.jsonl
 ```
 
-`spine_wasm.js` does not need a hash in the filename because its SRI
-digest is in the host HTML and its `import` URL is fixed.
+`spine_wasm.js` does not need a hash in the filename because it is
+fetched and hash-checked against `manifest.js_sha256` at runtime (§1,
+§2), not loaded via a static `<script src>` tag.
 
 ## Out of scope for this spec
 
