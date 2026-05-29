@@ -112,9 +112,7 @@ fn verify_valid_wal_reports_valid_json() {
     assert_eq!(report["valid"], true);
     assert_eq!(report["events_verified"], 3);
     assert!(
-        report["chain_root"]
-            .as_str()
-            .is_some_and(|r| r.len() == 64),
+        report["chain_root"].as_str().is_some_and(|r| r.len() == 64),
         "chain_root should be a 64-char hex digest"
     );
 }
@@ -130,7 +128,10 @@ fn verify_valid_wal_text_format_renders_human_report() {
 
     let text = stdout(&out);
     assert!(text.contains("Status: VALID"), "text report shows status");
-    assert!(text.contains("Events verified:"), "text report shows event count");
+    assert!(
+        text.contains("Events verified:"),
+        "text report shows event count"
+    );
     assert!(text.contains("Chain root:"), "text report shows chain root");
 }
 
@@ -243,8 +244,7 @@ fn export_jsonl_writes_records_and_manifest() {
     // format.
     let sidecar = out_dir.path().join("export.jsonl.manifest.json");
     let sidecar_body = std::fs::read_to_string(&sidecar).expect("sidecar manifest should exist");
-    let sidecar_json: Value =
-        serde_json::from_str(&sidecar_body).expect("sidecar should be JSON");
+    let sidecar_json: Value = serde_json::from_str(&sidecar_body).expect("sidecar should be JSON");
     assert!(sidecar_json["source_chain_root"]
         .as_str()
         .is_some_and(|r| r.len() == 64));

@@ -530,8 +530,10 @@ fn format_syslog(entry: &WalEntry, facility: u8) -> String {
     // fits a u32, so the truncation can never lose information.
     #[allow(clippy::cast_possible_truncation)]
     let sub_nanos = entry.timestamp_ns.rem_euclid(1_000_000_000) as u32;
-    let ts = DateTime::<Utc>::from_timestamp(secs, sub_nanos)
-        .map_or_else(|| format!("ns:{}", entry.timestamp_ns), |dt| dt.to_rfc3339());
+    let ts = DateTime::<Utc>::from_timestamp(secs, sub_nanos).map_or_else(
+        || format!("ns:{}", entry.timestamp_ns),
+        |dt| dt.to_rfc3339(),
+    );
     let event_type = entry.event_type.as_deref().unwrap_or("-");
     let source = entry.source.as_deref().unwrap_or("-");
     let hash_short: String = entry.payload_hash.chars().take(16).collect();
