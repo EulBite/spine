@@ -239,16 +239,21 @@ fn run_with_args(args: &ExportArgs<'_>) -> Result<bool, ExportCmdError> {
         write_manifest_inline(&mut sink, &manifest)?;
     }
 
-    // Commit the main file. From here on out, partial state is the
-    // user's problem because the bytes are on disk and named.
-    sink.commit()?;
-
-    // Sidecar manifest, regardless of format. Written only when
-    // --output is set; stdout exports have no canonical place for it.
+    // Publish the sidecar manifest BEFORE the data file. Both writes are
+    // individually atomic (temp file + rename), but the data must never be
+    // published without its manifest: an export file on disk with no manifest
+    // looks complete while lacking the digest a consumer needs to trust it.
+    // Writing the sidecar first means that if it fails, the data file is still
+    // a temp and never appears at its final path. The reverse partial
+    // (manifest present, data missing) is benign and self-evident. Only
+    // written when --output is set; stdout exports have no place for a sidecar.
     if let Some(p) = output_path {
         let sidecar = sidecar_path(p);
         write_sidecar_manifest(&sidecar, &manifest)?;
     }
+
+    // Now atomically publish the data file (temp + rename).
+    sink.commit()?;
 
     if format != OutputFormat::Quiet {
         eprintln!("Exported {exported} records");

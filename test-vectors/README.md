@@ -69,10 +69,12 @@ Implementations MUST produce the byte-for-byte sequence in
   characters sort before U+E000..U+FFFF.
 - Strings are escaped per RFC 8259 (matches `JSON.stringify`).
 - Forward slash `/` is not escaped.
-- Integers in `i64` range and integer-valued floats (`2.0`, `-0`)
-  serialise as decimal digits without a decimal point. Non-integer
-  floats are rejected: payloads must encode monetary or fractional
-  values as strings (`"amount":"100.00"`).
+- Integers in `i64` range and integer-valued floats (`2.0`, `-0`) that
+  map to an `i64` exactly serialise as decimal digits without a decimal
+  point. Non-integer floats are rejected, and so are integer-valued floats
+  outside `i64` range (saturating them would let two distinct payloads
+  produce identical bytes, breaking injectivity). Payloads must encode
+  monetary or fractional values as strings (`"amount":"100.00"`).
 - No whitespace between tokens.
 
 ## 2. Payload hash (strict profile)

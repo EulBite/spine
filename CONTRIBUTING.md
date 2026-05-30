@@ -60,7 +60,7 @@ Prerequisites:
 The minimum gate every change must pass before merge:
 
 ```sh
-cargo test --workspace                    # 115/115 pass
+cargo test --workspace                    # 116/116 pass
 cargo clippy --workspace --all-targets    # zero warnings
 cargo build --target wasm32-unknown-unknown -p spine-core --release
                                           # clean wasm32 build
@@ -125,7 +125,7 @@ sha256sum spine-wasm/pkg/spine_wasm_bg.wasm   # must match
 - For changes that touch crypto contracts, signature schemes, or
   the canonical-JSON subset, include a one-line verification
   block in the body listing the test commands you ran and their
-  results (`115/115 pass`, `wasm32 build clean`, etc.).
+  results (`116/116 pass`, `wasm32 build clean`, etc.).
 - Update `CHANGELOG.md` under the `[Unreleased]` heading for any
   notable or user-facing change. The format follows
   [Keep a Changelog](https://keepachangelog.com).

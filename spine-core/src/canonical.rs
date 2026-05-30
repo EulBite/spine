@@ -25,14 +25,18 @@
 //!   order** (matches `Array.prototype.sort()` in JS), serialized as
 //!   `{"k1":v1,"k2":v2,…}`, no whitespace.
 //!
-//! Numbers must be integer-valued. A JSON float with a whole value such
-//! as `2.0` or `-0` is accepted and serialized without a decimal point
-//! (matching `Number.isInteger`); only a finite non-integer number is
-//! rejected with [`CanonicalError::NonIntegerNumber`]. NaN / Infinity
+//! Numbers must be integer-valued AND representable as an `i64`. A JSON
+//! float with a whole value such as `2.0` or `-0` is accepted and
+//! serialized without a decimal point (matching `Number.isInteger`), but
+//! only when it maps to an `i64` exactly. A finite non-integer is rejected
+//! with [`CanonicalError::NonIntegerNumber`]; an integer-valued float
+//! outside `i64` range is rejected with [`CanonicalError::NumberOutOfRange`]
+//! (saturating it would let two distinct payloads canonicalize to the same
+//! bytes, so the canonical form would no longer be injective). NaN / Infinity
 //! cannot occur because `serde_json::Value::Number` rejects them at parse
-//! time. This is intentional: the demo WAL encodes monetary amounts as
-//! strings (e.g. `"amount": "100.00"`), sidestepping ECMA-262
-//! `NumberToString` quirks entirely.
+//! time. This is intentional: the demo WAL encodes monetary amounts as strings (e.g.
+//! `"amount": "100.00"`), sidestepping ECMA-262 `NumberToString` quirks
+//! entirely.
 //!
 //! ## Subtlety: UTF-16 vs UTF-8 key ordering
 //!
@@ -55,6 +59,9 @@ pub enum CanonicalError {
 
     #[error("non-integer number not supported in canonical JSON: {0}")]
     NonIntegerNumber(String),
+
+    #[error("integer outside i64 range not supported in canonical JSON: {0}")]
+    NumberOutOfRange(String),
 }
 
 /// Canonicalize a parsed JSON value to a UTF-8 byte sequence.
@@ -141,14 +148,24 @@ fn write_number(n: &serde_json::Number, out: &mut Vec<u8>) -> Result<(), Canonic
     // here, but `is_finite()` guards regardless).
     if let Some(f) = n.as_f64() {
         if f.is_finite() && f.fract() == 0.0 {
-            // `f as i64` saturates at i64::MIN/MAX for out-of-range inputs,
-            // matching the lossy precision JS already accepted at parse time.
-            // The truncation is the intended behavior, not a bug, so the
-            // pedantic lint is silenced explicitly here.
+            // Accept an integer-valued float (e.g. `2.0`, `-0`) only when it
+            // maps to an i64 exactly. A bare `f as i64` SATURATES at
+            // i64::MIN/MAX for out-of-range inputs, so distinct values such as
+            // 2e19 and 3e19 would both saturate to i64::MAX and lose their
+            // distinctness. Refusing ambiguous values keeps the canonical form
+            // injective, which is the property the hash relies on.
             #[allow(clippy::cast_possible_truncation)]
             let as_int = f as i64;
-            out.extend_from_slice(as_int.to_string().as_bytes());
-            return Ok(());
+            // Exact round-trip check: the float comparison is intentional, it
+            // verifies that no precision was lost (and that no saturation
+            // happened) before we trust `as_int`.
+            #[allow(clippy::cast_precision_loss, clippy::float_cmp)]
+            let round_trips = as_int as f64 == f;
+            if round_trips {
+                out.extend_from_slice(as_int.to_string().as_bytes());
+                return Ok(());
+            }
+            return Err(CanonicalError::NumberOutOfRange(n.to_string()));
         }
     }
     Err(CanonicalError::NonIntegerNumber(n.to_string()))
@@ -244,6 +261,26 @@ mod tests {
         // produced canonical form and a Rust-produced one converge.
         let result = canonical_json(&json!([1, 2.0_f64])).unwrap();
         assert_eq!(String::from_utf8(result).unwrap(), "[1,2]");
+    }
+
+    #[test]
+    fn rejects_integer_valued_floats_outside_i64_range() {
+        // Regression: a saturating `f as i64` used to collapse every
+        // out-of-range integer-valued float to i64::MIN/MAX, so two distinct
+        // payloads (2e19 and 3e19) canonicalized to the same bytes, which the
+        // round-trip check now refuses so the canonical form stays injective.
+        assert!(matches!(
+            canonical_json(&json!(2.0e19_f64)),
+            Err(CanonicalError::NumberOutOfRange(_))
+        ));
+        assert!(matches!(
+            canonical_json(&json!(3.0e19_f64)),
+            Err(CanonicalError::NumberOutOfRange(_))
+        ));
+        assert!(matches!(
+            canonical_json(&json!(-2.0e19_f64)),
+            Err(CanonicalError::NumberOutOfRange(_))
+        ));
     }
 
     #[test]

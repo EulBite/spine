@@ -14,8 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `spine-core`: parse fixed-width hex strings with `try_into`, and document the
-  saturating float-to-integer cast in canonical number serialization.
+- `spine-core`: parse fixed-width hex strings with `try_into`.
 - Resolved `clippy` pedantic and nursery lints across `spine-cli` and
   `spine-wasm`.
 - Rendered the playground initialisation and integrity-check flow as a Mermaid
@@ -26,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `spine-core`: canonical JSON now rejects integer-valued floats outside `i64`
+  range instead of saturating the cast, tightening payload encoding so distinct payloads always serialise to distinct canonical bytes.
+- `spine-cli`: write the export sidecar manifest before publishing the data
+  file, so a failed manifest write can no longer leave a named export without a
+  manifest.
 - Corrected the documented test count and the demo chain-root value so the
   runbook matches the current output.
 
