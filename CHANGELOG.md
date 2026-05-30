@@ -9,8 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `spine-cli verify --strict`: verify a WAL under the strict profile (the same
+  contract the browser playground runs). Pins the signing key from
+  `--trusted-pubkey`, requires `--expected-root`, and recomputes each
+  `payload_hash` from the canonical JSON of the inline payload. This is the
+  profile the published demo WAL is signed under, so it now verifies on the CLI
+  as well as in the playground.
+- `spine-cli verify`: when every record fails signature verification under the
+  default lenient profile, the report now hints that the WAL may be
+  strict-profile and points at `--strict`, rather than leaving a bare wall of
+  identical signature errors.
 - `spine-cli` integration tests covering argument parsing, exit codes, and
-  JSONL/CSV/text output.
+  JSONL/CSV/text output, plus the strict profile and the profile hint.
 
 ### Changed
 
@@ -26,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `spine-core`: canonical JSON now rejects integer-valued floats outside `i64`
-  range instead of saturating the cast, tightening payload encoding so distinct payloads always serialise to distinct canonical bytes.
+  range instead of saturating the cast, tightening payload encoding so distinct
+  payloads always serialise to distinct canonical bytes.
 - `spine-cli`: write the export sidecar manifest before publishing the data
   file, so a failed manifest write can no longer leave a named export without a
   manifest.
