@@ -212,7 +212,9 @@ fn compute_stats(wal_path: &Path) -> Result<WalStats, InspectCmdError> {
             stats.integrity.prev_hash_links_ok = false;
         }
         if let Some(prev_seq) = prev_sequence {
-            if entry.sequence != prev_seq + 1 {
+            // saturating_add: a record may carry sequence = u64::MAX, and a
+            // bare `prev_seq + 1` would overflow on the following record.
+            if entry.sequence != prev_seq.saturating_add(1) {
                 stats.integrity.sequence_contiguous = false;
             }
         } else if entry.sequence != 1 {

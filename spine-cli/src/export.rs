@@ -575,15 +575,24 @@ fn syslog_token(s: &str) -> String {
     }
 }
 
-/// Escape `"` and `\` for values that land inside the quoted MSG
-/// portion. RFC 3164 / 5424 do not specify escaping; this matches
-/// the convention most SIEMs (Splunk, ELK, `QRadar`) accept.
+/// Escape `"`, `\`, and C0 control characters (including CR/LF) for
+/// values that land inside the quoted MSG portion. RFC 3164 / 5424 do not
+/// specify escaping; this matches the convention most SIEMs (Splunk, ELK,
+/// `QRadar`) accept. Escaping the control characters is load-bearing: a
+/// newline in a producer-controlled field (e.g. `event_type`) would
+/// otherwise split the line and forge an extra syslog record.
 fn syslog_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            // Any other C0 control character could split or corrupt the
+            // line; render it as a visible escape rather than emit it raw.
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
             c => out.push(c),
         }
     }

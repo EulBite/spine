@@ -15,9 +15,10 @@
 //!
 //! - **Strings**: escaped per RFC 8259 (matches `JSON.stringify`); content is
 //!   normalized to **Unicode NFC** before serialization.
-//! - **Integers** in `i64` range, plus `u64` values above `i64::MAX`.
-//!   Output: decimal digits, no leading sign for non-negative, no decimal
-//!   point. Matches `String(integer)` in JavaScript.
+//! - **Integers** with magnitude up to `2^53 - 1` (JavaScript's
+//!   `Number.MAX_SAFE_INTEGER`). Output: decimal digits, no leading sign
+//!   for non-negative, no decimal point. Matches `String(integer)` in
+//!   JavaScript. Larger integers are refused (see below).
 //! - **Booleans**: `true` / `false`.
 //! - **Null**: `null`.
 //! - **Arrays**: `[item1,item2,…]`, no whitespace.
@@ -25,18 +26,25 @@
 //!   order** (matches `Array.prototype.sort()` in JS), serialized as
 //!   `{"k1":v1,"k2":v2,…}`, no whitespace.
 //!
-//! Numbers must be integer-valued AND representable as an `i64`. A JSON
-//! float with a whole value such as `2.0` or `-0` is accepted and
-//! serialized without a decimal point (matching `Number.isInteger`), but
-//! only when it maps to an `i64` exactly. A finite non-integer is rejected
-//! with [`CanonicalError::NonIntegerNumber`]; an integer-valued float
-//! outside `i64` range is rejected with [`CanonicalError::NumberOutOfRange`]
-//! (saturating it would let two distinct payloads canonicalize to the same
-//! bytes, so the canonical form would no longer be injective). NaN / Infinity
-//! cannot occur because `serde_json::Value::Number` rejects them at parse
-//! time. This is intentional: the demo WAL encodes monetary amounts as strings (e.g.
-//! `"amount": "100.00"`), sidestepping ECMA-262 `NumberToString` quirks
-//! entirely.
+//! Numbers must be integer-valued AND within the JS-safe integer range
+//! (magnitude up to `2^53 - 1`). A JSON float with a whole value such as
+//! `2.0` or `-0` is accepted and serialized without a decimal point
+//! (matching `Number.isInteger`), but only when it maps exactly to a
+//! safe-range integer. A finite non-integer is rejected with
+//! [`CanonicalError::NonIntegerNumber`]; an integer (or integer-valued
+//! float) outside the safe range is rejected with
+//! [`CanonicalError::NumberOutOfRange`]. Refusing out-of-range values
+//! keeps the canonical form injective AND reproducible by a JS verifier
+//! that parses the WAL with `JSON.parse` (which would round anything past
+//! `2^53`). NaN / Infinity cannot occur because `serde_json::Value::Number`
+//! rejects them at parse time. This is intentional: the demo WAL encodes
+//! monetary amounts as strings (e.g. `"amount": "100.00"`), sidestepping
+//! ECMA-262 `NumberToString` quirks entirely.
+//!
+//! Object keys are NFC-normalized before sorting. If two byte-distinct
+//! input keys collapse to the same key after normalization, the value is
+//! rejected with [`CanonicalError::DuplicateKeyAfterNfc`] rather than
+//! emitting non-injective JSON with duplicate keys.
 //!
 //! ## Subtlety: UTF-16 vs UTF-8 key ordering
 //!
@@ -60,9 +68,25 @@ pub enum CanonicalError {
     #[error("non-integer number not supported in canonical JSON: {0}")]
     NonIntegerNumber(String),
 
-    #[error("integer outside i64 range not supported in canonical JSON: {0}")]
+    #[error(
+        "integer outside the safe range supported by canonical JSON (max magnitude 2^53-1): {0}"
+    )]
     NumberOutOfRange(String),
+
+    #[error("two object keys collide after NFC normalization: {0:?}")]
+    DuplicateKeyAfterNfc(String),
 }
+
+/// Largest integer magnitude that round-trips through an IEEE-754 double
+/// without loss, i.e. JavaScript's `Number.MAX_SAFE_INTEGER` (2^53 - 1).
+///
+/// Canonical JSON refuses integers beyond this. A larger integer is exact
+/// in Rust (serde keeps the full i64/u64), but a JS reimplementation that
+/// parsed the same WAL with `JSON.parse` already rounded it, so the two
+/// canonical forms would diverge and the cross-language hash contract
+/// would silently break. Producers encode larger values as strings (the
+/// demo WAL does this for monetary amounts).
+const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 /// Canonicalize a parsed JSON value to a UTF-8 byte sequence.
 ///
@@ -114,6 +138,17 @@ fn write_value(value: &Value, out: &mut Vec<u8>) -> Result<(), CanonicalError> {
                 .collect();
             entries.sort_by(|a, b| a.1.cmp(&b.1));
 
+            // Two byte-distinct input keys can collapse to the same key
+            // after NFC normalization (e.g. precomposed vs decomposed
+            // "café"). Emitting both would produce non-injective, invalid
+            // JSON (duplicate object keys) that a JS verifier would not
+            // reproduce, so reject. Duplicates are adjacent after the sort.
+            for adj in entries.windows(2) {
+                if adj[0].1 == adj[1].1 {
+                    return Err(CanonicalError::DuplicateKeyAfterNfc(adj[0].0.clone()));
+                }
+            }
+
             out.push(b'{');
             for (i, (key, _, val)) in entries.iter().enumerate() {
                 if i > 0 {
@@ -131,15 +166,21 @@ fn write_value(value: &Value, out: &mut Vec<u8>) -> Result<(), CanonicalError> {
 
 fn write_number(n: &serde_json::Number, out: &mut Vec<u8>) -> Result<(), CanonicalError> {
     if let Some(i) = n.as_i64() {
+        if !(-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&i) {
+            // Exact in Rust, but a JS verifier that parsed this with
+            // JSON.parse already lost precision, so the two canonical
+            // forms would diverge. Refuse rather than emit bytes no JS
+            // reimplementation can reproduce. See MAX_SAFE_INTEGER.
+            return Err(CanonicalError::NumberOutOfRange(n.to_string()));
+        }
         out.extend_from_slice(i.to_string().as_bytes());
         return Ok(());
     }
-    if let Some(u) = n.as_u64() {
-        // Only reachable for u64 > i64::MAX, which is outside JS safe range
-        // and we'd refuse to roundtrip anyway. Match JavaScript's String(u)
-        // for completeness.
-        out.extend_from_slice(u.to_string().as_bytes());
-        return Ok(());
+    if n.as_u64().is_some() {
+        // The only u64 values that are not also i64 are those above
+        // i64::MAX, which are far beyond MAX_SAFE_INTEGER. They cannot
+        // round-trip through a JS verifier, so refuse them.
+        return Err(CanonicalError::NumberOutOfRange(n.to_string()));
     }
     // Last resort: serde_json parses `-0` and any integer-valued literal that
     // overflows i64/u64 as `f64`. Match `Number.isInteger(value)` semantics:
@@ -161,7 +202,10 @@ fn write_number(n: &serde_json::Number, out: &mut Vec<u8>) -> Result<(), Canonic
             // happened) before we trust `as_int`.
             #[allow(clippy::cast_precision_loss, clippy::float_cmp)]
             let round_trips = as_int as f64 == f;
-            if round_trips {
+            // Also bound to the JS-safe range: a float at or beyond 2^53
+            // cannot distinguish adjacent integers, so accepting it would
+            // diverge from a JS verifier just as the integer path would.
+            if round_trips && (-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&as_int) {
                 out.extend_from_slice(as_int.to_string().as_bytes());
                 return Ok(());
             }
@@ -205,8 +249,47 @@ mod tests {
         assert_eq!(canon(json!(0)), "0");
         assert_eq!(canon(json!(-1)), "-1");
         assert_eq!(canon(json!(42)), "42");
-        assert_eq!(canon(json!(i64::MAX)), i64::MAX.to_string());
-        assert_eq!(canon(json!(i64::MIN)), i64::MIN.to_string());
+        // The largest magnitudes that still round-trip through a JS double.
+        assert_eq!(canon(json!(9_007_199_254_740_991i64)), "9007199254740991");
+        assert_eq!(canon(json!(-9_007_199_254_740_991i64)), "-9007199254740991");
+    }
+
+    #[test]
+    fn rejects_integers_beyond_js_safe_range() {
+        // At or beyond 2^53 a value cannot round-trip through a JS double,
+        // so a JS reimplementation that parsed the WAL with JSON.parse
+        // would disagree on the bytes. Refuse rather than diverge silently.
+        assert!(matches!(
+            canonical_json(&json!(9_007_199_254_740_992i64)), // 2^53
+            Err(CanonicalError::NumberOutOfRange(_))
+        ));
+        assert!(matches!(
+            canonical_json(&json!(i64::MAX)),
+            Err(CanonicalError::NumberOutOfRange(_))
+        ));
+        assert!(matches!(
+            canonical_json(&json!(i64::MIN)),
+            Err(CanonicalError::NumberOutOfRange(_))
+        ));
+        // A u64 above i64::MAX is likewise refused.
+        let big: Value = serde_json::from_str(r#"{"n":9223372036854775813}"#).unwrap();
+        assert!(matches!(
+            canonical_json(&big),
+            Err(CanonicalError::NumberOutOfRange(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_keys_colliding_after_nfc() {
+        // "cafe\u{0301}" (decomposed) and "caf\u{00e9}" (precomposed) are
+        // byte-distinct map keys that normalize to the same NFC key.
+        // Emitting both would be duplicate, non-injective JSON.
+        let input = "{\"cafe\u{0301}\":1,\"caf\u{00e9}\":2}";
+        let result = canonical_json_from_bytes(input.as_bytes());
+        assert!(matches!(
+            result,
+            Err(CanonicalError::DuplicateKeyAfterNfc(_))
+        ));
     }
 
     #[test]
