@@ -7,7 +7,11 @@
 //!
 //! * `verify`: lenient verification of a WAL directory against
 //!   `spine-core`. Optional `--keystore` enables receipt-signature
-//!   verification; `--trusted-pubkey` pins the signing key.
+//!   verification; `--trusted-pubkey` pins the signing key. Pass
+//!   `--strict` to switch to the strict profile (the playground
+//!   contract): the pinned pubkey and `--expected-root` become
+//!   mandatory and each `payload_hash` is recomputed from the inline
+//!   payload's canonical JSON.
 //! * `inspect`: human-readable view of WAL contents. No verification.
 //! * `export`: filter and export entries to JSONL, CSV or syslog. A
 //!   `.manifest.json` sidecar is always written next to the output
@@ -114,9 +118,27 @@ enum Commands {
         /// instead of being silently trusted. Without this flag the
         /// lenient verifier trusts the record-declared pubkey (and
         /// warns about it), which is sufficient for offline audit
-        /// but not for an enterprise CI gate.
+        /// but not for an enterprise CI gate. Under `--strict` this
+        /// is the externally pinned key and is mandatory.
         #[arg(long)]
         trusted_pubkey: Option<String>,
+
+        /// Verify under the strict profile: the same contract the
+        /// browser playground runs. Every record must be signed, the
+        /// signing key is pinned from `--trusted-pubkey` (mandatory),
+        /// `--expected-root` is mandatory, and each `payload_hash` is
+        /// recomputed from the canonical JSON of the inline payload.
+        /// Strict signatures are domain-separated, so a strict-profile
+        /// WAL (for example the published Spine demo WAL) fails the
+        /// default lenient path; pass `--strict` to verify it.
+        #[arg(long)]
+        strict: bool,
+
+        /// Manifest version echoed into the strict report so a
+        /// consumer can pin the exact contract it expects. Strict
+        /// profile only; ignored in lenient mode.
+        #[arg(long, default_value_t = 1)]
+        manifest_version: u32,
     },
 
     /// Export WAL records (JSONL, CSV or syslog) with optional time
@@ -208,6 +230,8 @@ fn main() -> ExitCode {
             fail_fast,
             keystore,
             trusted_pubkey,
+            strict,
+            manifest_version,
         } => verify::run(
             &wal,
             expected_root.as_deref(),
@@ -215,6 +239,8 @@ fn main() -> ExitCode {
             fail_fast,
             keystore.as_deref(),
             trusted_pubkey.as_deref(),
+            strict,
+            manifest_version,
             cli.format,
         )
         .map_err(|e| e.to_string()),

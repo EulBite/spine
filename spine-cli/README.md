@@ -12,7 +12,12 @@ playground, so a WAL that verifies here verifies there byte-for-byte.
 
 - `verify`: run BLAKE3 hash-chain and Ed25519 signature verification over a
   WAL directory. Exit code is `0` on `valid:true`, `1` on `valid:false`, `2`
-  on I/O or input errors.
+  on I/O or input errors. Defaults to the **lenient** profile (tolerates
+  unsigned records, `--expected-root` optional, trusts record-declared keys).
+  Pass `--strict` for the **strict** profile: the exact contract the browser
+  playground runs, with the signing key pinned from `--trusted-pubkey`,
+  `--expected-root` mandatory, and every `payload_hash` recomputed from the
+  inline payload's canonical JSON.
 - `export`: emit the audit trail as JSON-Lines, CSV, or RFC 5424 syslog.
   JSONL exports written to file are accompanied by a `.manifest.json` that
   pins the chain root (cross-verifiable with `verify`).
@@ -21,11 +26,17 @@ playground, so a WAL that verifies here verifies there byte-for-byte.
 ## Quick example
 
 ```bash
-# Verify a directory of .wal / .jsonl segments
+# Verify a directory of .wal / .jsonl segments (lenient profile)
 spine-cli verify --wal /path/to/wal
 
 # Same, but emit a JSON report to stdout
 spine-cli --format json verify --wal /path/to/wal
+
+# Strict profile: pin the signing key and chain root from outside the
+# WAL. This is how the published demo WAL verifies (the lenient default
+# rejects its domain-separated signatures by design).
+spine-cli verify --strict --wal /path/to/wal \
+  --trusted-pubkey <64-hex-pubkey> --expected-root <64-hex-root>
 
 # Show 20 most recent events as a table
 spine-cli inspect --wal /path/to/wal -n 20

@@ -37,3 +37,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 
 [dev-dependencies]
 tempfile = "3.14"
+# Smoke tests build a strict-profile signed WAL fixture in-process to
+# exercise `verify --strict`. A fixed 32-byte seed key (no randomness)
+# keeps the fixture deterministic, so no `rand` feature is needed.
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }

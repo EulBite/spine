@@ -14,8 +14,12 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
-use spine_core::{compute_entry_hash, WalEntry, GENESIS_PREV_HASH};
+use spine_core::{
+    canonical_json, compute_entry_hash, compute_entry_hash_for_signing, WalEntry,
+    GENESIS_PREV_HASH, STRICT_DOMAIN_SEP,
+};
 use tempfile::TempDir;
 
 const fn bin() -> &'static str {
@@ -73,6 +77,65 @@ fn wal_dir() -> TempDir {
 
 fn path_str(p: &Path) -> &str {
     p.to_str().expect("path should be valid UTF-8")
+}
+
+/// Write a 3-entry strict-profile WAL into `dir`: every record carries
+/// an inline payload and a domain-separated Ed25519 signature, exactly
+/// the contract `verify --strict` (and the browser playground) runs.
+/// Returns the pinned pubkey hex and the expected chain root hex.
+fn write_strict_wal(dir: &Path) -> (String, String) {
+    // Fixed seed: deterministic fixture, no randomness needed.
+    let signing = SigningKey::from_bytes(&[7u8; 32]);
+    let pubkey_hex = hex::encode(signing.verifying_key().to_bytes());
+
+    let mut prev = GENESIS_PREV_HASH.to_string();
+    let mut accum = blake3::Hasher::new();
+    let mut lines = String::new();
+    let mut ts: i64 = 1_700_000_000_000_000_000;
+    for seq in 1u64..=3 {
+        ts += 1_000_000_000;
+        let payload = json!({ "amount": "100.00", "seq": seq });
+        let canonical = canonical_json(&payload).expect("payload should canonicalise");
+        let payload_hash = hex::encode(blake3::hash(&canonical).as_bytes());
+
+        let mut e: WalEntry = serde_json::from_value(json!({
+            "format_version": 1,
+            "sequence": seq,
+            "timestamp_ns": ts,
+            "prev_hash": prev,
+            "payload_hash": payload_hash,
+            "payload": payload,
+        }))
+        .expect("strict fixture entry should deserialize");
+
+        // Sign STRICT_DOMAIN_SEP || sign_hash_hex, then chain on the
+        // full entry hash (which folds in signature + pubkey presence).
+        let sign_hash_hex = compute_entry_hash_for_signing(&e);
+        let mut msg = Vec::with_capacity(STRICT_DOMAIN_SEP.len() + sign_hash_hex.len());
+        msg.extend_from_slice(STRICT_DOMAIN_SEP);
+        msg.extend_from_slice(sign_hash_hex.as_bytes());
+        e.signature = Some(hex::encode(signing.sign(&msg).to_bytes()));
+        e.public_key = Some(pubkey_hex.clone());
+
+        let entry_hash = compute_entry_hash(&e);
+        accum.update(entry_hash.as_bytes());
+        prev = entry_hash;
+
+        lines.push_str(&serde_json::to_string(&e).expect("entry should serialize"));
+        lines.push('\n');
+    }
+    std::fs::write(dir.join("00000001.jsonl"), lines).expect("strict wal segment should write");
+    let root = hex::encode(accum.finalize().as_bytes());
+    (pubkey_hex, root)
+}
+
+/// A non-valid strict record matching `outcome` and (optionally)
+/// `reason.kind`, if present in a strict JSON report.
+fn find_strict_record<'a>(report: &'a Value, outcome: &str, kind: &str) -> Option<&'a Value> {
+    report["records"]
+        .as_array()?
+        .iter()
+        .find(|r| r["outcome"] == outcome && r["reason"]["kind"] == kind)
 }
 
 #[test]
@@ -301,4 +364,172 @@ fn export_out_of_range_syslog_facility_exits_two() {
         "99",
     ]);
     assert_eq!(code(&out), 2, "facility must be 0..=23");
+}
+
+#[test]
+fn verify_strict_valid_wal_passes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (pubkey, root) = write_strict_wal(dir.path());
+
+    let out = run(&[
+        "--format",
+        "json",
+        "verify",
+        "--strict",
+        "--wal",
+        path_str(dir.path()),
+        "--trusted-pubkey",
+        &pubkey,
+        "--expected-root",
+        &root,
+    ]);
+    assert_eq!(code(&out), 0, "valid strict WAL should pass");
+
+    let report: Value = serde_json::from_str(&stdout(&out)).expect("strict report should be JSON");
+    assert_eq!(report["status"], "valid");
+    assert_eq!(report["events_verified"], 3);
+    assert_eq!(report["signatures_verified"], 3);
+}
+
+#[test]
+fn verify_strict_detects_payload_tamper() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (pubkey, root) = write_strict_wal(dir.path());
+
+    // Edit the amount inside the first payload without updating its
+    // declared payload_hash: the strict recompute must catch it.
+    let seg = dir.path().join("00000001.jsonl");
+    let body = std::fs::read_to_string(&seg).expect("segment should read");
+    std::fs::write(&seg, body.replacen("100.00", "999.99", 1)).expect("tamper write");
+
+    let out = run(&[
+        "--format",
+        "json",
+        "verify",
+        "--strict",
+        "--wal",
+        path_str(dir.path()),
+        "--trusted-pubkey",
+        &pubkey,
+        "--expected-root",
+        &root,
+    ]);
+    assert_eq!(code(&out), 1, "tampered strict WAL should report issues");
+
+    let report: Value = serde_json::from_str(&stdout(&out)).expect("strict report should be JSON");
+    assert_eq!(report["status"], "invalid");
+    assert!(
+        find_strict_record(&report, "invalid", "payload_hash_mismatch").is_some(),
+        "tamper must surface as payload_hash_mismatch"
+    );
+}
+
+#[test]
+fn verify_strict_wrong_pubkey_is_rejected_not_signature_failure() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_pubkey, root) = write_strict_wal(dir.path());
+    let wrong = "cc".repeat(32);
+
+    let out = run(&[
+        "--format",
+        "json",
+        "verify",
+        "--strict",
+        "--wal",
+        path_str(dir.path()),
+        "--trusted-pubkey",
+        &wrong,
+        "--expected-root",
+        &root,
+    ]);
+    assert_eq!(code(&out), 1, "wrong pinned pubkey should report issues");
+
+    let report: Value = serde_json::from_str(&stdout(&out)).expect("strict report should be JSON");
+    assert_eq!(report["status"], "invalid");
+    assert!(
+        find_strict_record(&report, "rejected", "pubkey_mismatch").is_some(),
+        "wrong key must be a pubkey_mismatch rejection, never a signature failure"
+    );
+}
+
+#[test]
+fn verify_strict_requires_pinned_pubkey_and_root() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (pubkey, root) = write_strict_wal(dir.path());
+
+    // Missing --trusted-pubkey.
+    let no_key = run(&[
+        "verify",
+        "--strict",
+        "--wal",
+        path_str(dir.path()),
+        "--expected-root",
+        &root,
+    ]);
+    assert_eq!(
+        code(&no_key),
+        2,
+        "strict without a pinned pubkey is a usage error"
+    );
+
+    // Missing --expected-root.
+    let no_root = run(&[
+        "verify",
+        "--strict",
+        "--wal",
+        path_str(dir.path()),
+        "--trusted-pubkey",
+        &pubkey,
+    ]);
+    assert_eq!(
+        code(&no_root),
+        2,
+        "strict without an expected root is a usage error"
+    );
+}
+
+#[test]
+fn verify_strict_rejects_keystore_flag() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (pubkey, root) = write_strict_wal(dir.path());
+
+    let out = run(&[
+        "verify",
+        "--strict",
+        "--wal",
+        path_str(dir.path()),
+        "--trusted-pubkey",
+        &pubkey,
+        "--expected-root",
+        &root,
+        "--keystore",
+        "unused.json",
+    ]);
+    assert_eq!(code(&out), 2, "--keystore is not supported under --strict");
+}
+
+#[test]
+fn verify_lenient_on_strict_wal_emits_profile_hint() {
+    // The whole point of the feature: a strict-signed WAL run through
+    // the default lenient path fails every signature. Instead of a
+    // bare wall of errors, the report must point the user at --strict.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_pubkey, _root) = write_strict_wal(dir.path());
+
+    let out = run(&["--format", "json", "verify", "--wal", path_str(dir.path())]);
+    assert_eq!(
+        code(&out),
+        1,
+        "strict WAL fails the lenient signature check"
+    );
+
+    let report: Value = serde_json::from_str(&stdout(&out)).expect("report should be JSON");
+    assert_eq!(report["valid"], false);
+    let warnings = report["warnings"].as_array().expect("warnings array");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().is_some_and(|s| s.contains("--strict"))),
+        "lenient failure on a strict WAL must hint at --strict"
+    );
 }
