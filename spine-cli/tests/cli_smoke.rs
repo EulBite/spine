@@ -533,3 +533,75 @@ fn verify_lenient_on_strict_wal_emits_profile_hint() {
         "lenient failure on a strict WAL must hint at --strict"
     );
 }
+
+#[test]
+fn inspect_stats_on_max_sequence_does_not_panic() {
+    // Regression: a record carrying sequence = u64::MAX overflowed the
+    // `prev_seq + 1` contiguity check, panicking the binary (exit 101).
+    // It must now report a non-contiguous chain and exit cleanly.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let line1 = json!({
+        "sequence": u64::MAX,
+        "timestamp_ns": 1,
+        "prev_hash": GENESIS_PREV_HASH,
+        "payload_hash": "ab".repeat(32),
+    });
+    let line2 = json!({
+        "sequence": 5,
+        "timestamp_ns": 2,
+        "prev_hash": "cd".repeat(32),
+        "payload_hash": "ef".repeat(32),
+    });
+    let body = format!("{line1}\n{line2}\n");
+    std::fs::write(dir.path().join("00000001.jsonl"), body).expect("write wal");
+
+    let out = run(&[
+        "inspect",
+        "--wal",
+        path_str(dir.path()),
+        "--stats",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&out), 0, "stats on a u64::MAX sequence must not panic");
+    let stats: Value = serde_json::from_str(&stdout(&out)).expect("stats JSON");
+    assert_eq!(stats["integrity"]["sequence_contiguous"], false);
+}
+
+#[test]
+fn export_syslog_escapes_control_chars_in_event_type() {
+    // A producer-controlled newline in event_type must not split the
+    // syslog output into an extra forged record.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let line = json!({
+        "sequence": 1,
+        "timestamp_ns": 1_700_000_000_000_000_000i64,
+        "prev_hash": GENESIS_PREV_HASH,
+        "payload_hash": "ab".repeat(32),
+        "event_type": "login\n<13>1 forged",
+        "source": "auth",
+    });
+    std::fs::write(dir.path().join("00000001.jsonl"), format!("{line}\n")).expect("write wal");
+
+    let out = run(&[
+        "export",
+        "--wal",
+        path_str(dir.path()),
+        "--export-format",
+        "syslog",
+        "--format",
+        "quiet",
+    ]);
+    assert_eq!(code(&out), 0);
+    let body = stdout(&out);
+    let lines: Vec<&str> = body.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "a newline in event_type must not add a syslog line"
+    );
+    assert!(
+        body.contains("\\n"),
+        "the newline must be escaped, not emitted raw"
+    );
+}

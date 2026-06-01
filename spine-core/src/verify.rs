@@ -258,13 +258,18 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
         }
 
         if let Some(prev_seq) = prev_sequence {
-            if entry.sequence != prev_seq + 1 {
+            // saturating_add: a hostile record can carry sequence = u64::MAX
+            // (it fails the genesis check, but in accumulate-all mode the
+            // chain still advances and records it as prev_sequence), and a
+            // bare `prev_seq + 1` would then overflow on the next record.
+            // spine-core promises never to panic, so saturate instead.
+            let expected = prev_seq.saturating_add(1);
+            if entry.sequence != expected {
                 let err = VerificationError {
                     sequence: Some(entry.sequence),
                     error_type: "sequence_gap".to_string(),
                     details: format!(
-                        "expected sequence {} after {prev_seq}, found {}",
-                        prev_seq + 1,
+                        "expected sequence {expected} after {prev_seq}, found {}",
                         entry.sequence
                     ),
                 };
@@ -894,6 +899,22 @@ mod tests {
         let r = verify_wal_bytes(&bytes);
         assert!(!r.valid);
         assert!(r.errors.iter().any(|e| e.error_type == "parse_error"));
+    }
+
+    #[test]
+    fn max_sequence_first_record_does_not_panic() {
+        // Regression: a first record carrying sequence = u64::MAX used to
+        // overflow `prev_seq + 1` on the following record (panic in debug,
+        // silent wrap in release). It must now degrade to a normal failure
+        // rather than abort the verifier.
+        let a = make_entry(u64::MAX, 1, GENESIS_PREV_HASH, "p1");
+        let h = compute_entry_hash(&a);
+        let b = make_entry(5, 2, &h, "p2");
+        let bytes = to_jsonl(&[a, b]);
+        let r = verify_wal_bytes(&bytes);
+        assert!(!r.valid); // genesis sequence is not 1
+        assert_eq!(r.events_verified, 2);
+        assert!(r.errors.iter().any(|e| e.error_type == "sequence_gap"));
     }
 
     #[test]
