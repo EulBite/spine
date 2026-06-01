@@ -157,7 +157,47 @@ pub enum RejectedReason {
     LineTooLarge { bytes: usize, limit: usize },
     NonCanonicalPayload { details: String },
     TooManyRecords { limit: usize },
+    UnknownField { field: String },
 }
+
+/// Every JSON key the strict profile recognizes on a record: the canonical
+/// [`WalEntry`] field names plus their serde aliases. The strict verifier
+/// rejects a record carrying any other key, so the playground's
+/// "every byte of the record is accounted for" guarantee holds: a key that
+/// `serde` would otherwise silently ignore (a typo, a renamed field, or an
+/// injected extra field) cannot ride along on an otherwise-valid record.
+/// The lenient profile keeps tolerating unknown fields for compatibility
+/// with heterogeneous production producers; this allowlist is strict-only.
+const STRICT_ALLOWED_KEYS: &[&str] = &[
+    "format_version",
+    "sequence",
+    "seq",
+    "timestamp_ns",
+    "ts_ns",
+    "ts",
+    "timestamp",
+    "ts_client",
+    "prev_hash",
+    "previous_hash",
+    "prev",
+    "payload_hash",
+    "hash",
+    "event_hash",
+    "event_type",
+    "source",
+    "signature",
+    "sig",
+    "sig_client",
+    "public_key",
+    "pubkey",
+    "pk",
+    "key_id",
+    "event_id",
+    "stream_id",
+    "hash_alg",
+    "payload",
+    "receipt",
+];
 
 /// Verify a strict WAL. Always returns a [`DemoReport`]; configuration
 /// errors (malformed `expected_pubkey`, `expected_root` not 64 hex
@@ -172,9 +212,16 @@ pub fn verify_demo_wal(
     expected_root: &str,
     manifest_version: u32,
 ) -> DemoReport {
-    let expected_pubkey_fp = fingerprint(expected_pubkey);
+    // Normalize the pinned pubkey the same way the CLI and the expected_root
+    // path already do (trim, strip optional 0x/0X, lowercase), so every
+    // surface accepts the identical set of anchor strings. Previously the
+    // core forwarded the pubkey verbatim while the CLI trimmed/stripped it,
+    // so a `0x`-prefixed or whitespace-padded key verified on the CLI but
+    // errored in the wasm playground.
+    let expected_pubkey = crate::normalize_hex_anchor(expected_pubkey);
+    let expected_pubkey_fp = fingerprint(&expected_pubkey);
 
-    let expected_pubkey_bytes = match parse_hex_32(expected_pubkey) {
+    let expected_pubkey_bytes = match parse_hex_32(&expected_pubkey) {
         Ok(b) => b,
         Err(details) => {
             return error_report(
@@ -192,14 +239,11 @@ pub fn verify_demo_wal(
         );
     }
 
-    // Strip an optional `0x` prefix before checking the length, so a
-    // manifest authored by hand or by a tool that emits Ethereum-style
-    // hex still parses. Matches the lenient verifier.
-    let expected_root_trimmed = expected_root.trim();
-    let expected_root_norm = expected_root_trimmed
-        .strip_prefix("0x")
-        .unwrap_or(expected_root_trimmed)
-        .to_lowercase();
+    // Strip an optional `0x`/`0X` prefix and surrounding whitespace before
+    // checking the length, so a manifest authored by hand or by a tool that
+    // emits Ethereum-style hex still parses. Shared with the pinned pubkey
+    // and the lenient verifier via `normalize_hex_anchor`.
+    let expected_root_norm = crate::normalize_hex_anchor(expected_root);
     if expected_root_norm.len() != 64 || !expected_root_norm.chars().all(|c| c.is_ascii_hexdigit())
     {
         return error_report(
@@ -291,6 +335,30 @@ pub fn verify_demo_wal(
                 break;
             }
         };
+        // Strict-only: refuse any record key that is not a recognized field
+        // or alias. serde would silently drop an unknown key, leaving a
+        // flipped/renamed/injected field invisible while the record still
+        // verified Valid; the strict playground promises that every byte of a
+        // record is accounted for, so reject instead of ignore.
+        if let Some(map) = raw_value.as_object() {
+            if let Some(unknown) = map
+                .keys()
+                .find(|k| !STRICT_ALLOWED_KEYS.contains(&k.as_str()))
+            {
+                let seq = prev_sequence.map(|s| s + 1).unwrap_or(record_count as u64);
+                report.records.push(DemoRecordEntry {
+                    sequence: seq,
+                    outcome: DemoRecordOutcome::Rejected {
+                        reason: RejectedReason::UnknownField {
+                            field: unknown.clone(),
+                        },
+                    },
+                });
+                halted = true;
+                break;
+            }
+        }
+
         let format_version_declared = raw_value
             .as_object()
             .is_some_and(|m| m.contains_key("format_version"));
@@ -956,5 +1024,70 @@ mod tests {
                 reason: RejectedReason::LineTooLarge { .. }
             }
         ));
+    }
+
+    #[test]
+    fn strict_rejects_an_unknown_record_field() {
+        // serde silently drops a key that is not a WalEntry field or alias,
+        // so a flipped/renamed/injected field name would otherwise ride along
+        // on an otherwise-valid record without changing its (unauthenticated)
+        // meaning and the record would still verify Valid. The strict profile
+        // must reject the record instead, so every byte is accounted for.
+        let (sk, pk_hex) = signer_keypair(0xC0);
+        let (entries, root) = build_chain(1, &sk);
+        let line = serde_json::to_string(&entries[0]).unwrap();
+        // Inject an unknown key (does not touch any signed/hashed field, so a
+        // pre-fix verifier returned Valid here).
+        let tampered = line.replacen('{', r#"{"injected_extra":1,"#, 1);
+        let bytes = format!("{tampered}\n").into_bytes();
+
+        let report = verify_demo_wal(&bytes, &pk_hex, &root, 1);
+        assert_eq!(report.status, DemoStatus::Invalid);
+        assert!(matches!(
+            &report.records.last().unwrap().outcome,
+            DemoRecordOutcome::Rejected {
+                reason: RejectedReason::UnknownField { field }
+            } if field == "injected_extra"
+        ));
+    }
+
+    #[test]
+    fn strict_rejects_a_renamed_metadata_field() {
+        // The single-byte-flip class: corrupting an UNAUTHENTICATED field name
+        // (here `hash_alg` -> `hash_Alg`) used to leave the record Valid
+        // because serde dropped the unknown key and `hash_alg` defaulted to
+        // None (accepted as blake3). The allowlist now rejects it.
+        let (sk, pk_hex) = signer_keypair(0xC1);
+        let (entries, root) = build_chain(1, &sk);
+        let line = serde_json::to_string(&entries[0]).unwrap();
+        let tampered = line.replace("\"hash_alg\"", "\"hash_Alg\"");
+        assert_ne!(tampered, line, "fixture must contain hash_alg");
+        let bytes = format!("{tampered}\n").into_bytes();
+
+        let report = verify_demo_wal(&bytes, &pk_hex, &root, 1);
+        assert_eq!(report.status, DemoStatus::Invalid);
+        assert!(matches!(
+            &report.records.last().unwrap().outcome,
+            DemoRecordOutcome::Rejected {
+                reason: RejectedReason::UnknownField { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn strict_accepts_0x_prefixed_and_padded_anchors() {
+        // The pinned pubkey and expected root are normalized (trim, strip
+        // 0x/0X, lowercase) so the browser facade accepts exactly what the CLI
+        // accepts. Previously a 0x-prefixed or whitespace-padded pubkey errored
+        // in core/wasm while the CLI accepted it.
+        let (sk, pk_hex) = signer_keypair(0xC2);
+        let (entries, root) = build_chain(2, &sk);
+        let bytes = to_jsonl(&entries);
+
+        let padded_pubkey = format!("  0x{}  ", pk_hex.to_uppercase());
+        let padded_root = format!("0X{root}");
+        let report = verify_demo_wal(&bytes, &padded_pubkey, &padded_root, 1);
+        assert_eq!(report.status, DemoStatus::Valid, "report: {report:?}");
+        assert_eq!(report.events_verified, 2);
     }
 }

@@ -15,7 +15,8 @@
 //!
 //! - **Strings**: escaped per RFC 8259 (matches `JSON.stringify`); content is
 //!   normalized to **Unicode NFC** before serialization.
-//! - **Integers** with magnitude up to `2^53 - 1` (JavaScript's
+//! - **Integers** written in **integer syntax** (no decimal point, no
+//!   exponent) with magnitude up to `2^53 - 1` (JavaScript's
 //!   `Number.MAX_SAFE_INTEGER`). Output: decimal digits, no leading sign
 //!   for non-negative, no decimal point. Matches `String(integer)` in
 //!   JavaScript. Larger integers are refused (see below).
@@ -26,20 +27,25 @@
 //!   order** (matches `Array.prototype.sort()` in JS), serialized as
 //!   `{"k1":v1,"k2":v2,…}`, no whitespace.
 //!
-//! Numbers must be integer-valued AND within the JS-safe integer range
-//! (magnitude up to `2^53 - 1`). A JSON float with a whole value such as
-//! `2.0` or `-0` is accepted and serialized without a decimal point
-//! (matching `Number.isInteger`), but only when it maps exactly to a
-//! safe-range integer. A finite non-integer is rejected with
-//! [`CanonicalError::NonIntegerNumber`]; an integer (or integer-valued
-//! float) outside the safe range is rejected with
-//! [`CanonicalError::NumberOutOfRange`]. Refusing out-of-range values
-//! keeps the canonical form injective AND reproducible by a JS verifier
-//! that parses the WAL with `JSON.parse` (which would round anything past
-//! `2^53`). NaN / Infinity cannot occur because `serde_json::Value::Number`
-//! rejects them at parse time. This is intentional: the demo WAL encodes
-//! monetary amounts as strings (e.g. `"amount": "100.00"`), sidestepping
-//! ECMA-262 `NumberToString` quirks entirely.
+//! Numbers must be written in **integer syntax** AND be within the JS-safe
+//! integer range (magnitude up to `2^53 - 1`). Any number written with a
+//! decimal point or an exponent is stored by `serde_json` as `f64` and is
+//! **refused** with [`CanonicalError::NonIntegerNumber`] — this includes
+//! integer-valued floats such as `2.0` and `-0`. The reason is
+//! cross-language reproducibility: `serde_json`'s decimal-to-`f64` rounding
+//! diverges from a JavaScript `JSON.parse` for some inputs near `2^53` (the
+//! token `9007199254740991.0` parses to `9007199254740990.0` under
+//! `serde_json` but to `9007199254740991` under V8), and the original token
+//! text is gone by the time canonicalization runs, so the value a JS
+//! verifier would compute cannot be recovered. An integer written in
+//! integer syntax but outside the safe range is rejected with
+//! [`CanonicalError::NumberOutOfRange`]. Refusing these values keeps the
+//! canonical form injective AND reproducible by a JS verifier that parses
+//! the WAL with `JSON.parse`. NaN / Infinity cannot occur because
+//! `serde_json::Value::Number` rejects them at parse time. This is
+//! intentional: the demo WAL encodes monetary amounts as strings (e.g.
+//! `"amount": "100.00"`), sidestepping ECMA-262 `NumberToString` quirks
+//! entirely.
 //!
 //! Object keys are NFC-normalized before sorting. If two byte-distinct
 //! input keys collapse to the same key after normalization, the value is
@@ -182,36 +188,23 @@ fn write_number(n: &serde_json::Number, out: &mut Vec<u8>) -> Result<(), Canonic
         // round-trip through a JS verifier, so refuse them.
         return Err(CanonicalError::NumberOutOfRange(n.to_string()));
     }
-    // Last resort: serde_json parses `-0` and any integer-valued literal that
-    // overflows i64/u64 as `f64`. Match `Number.isInteger(value)` semantics:
-    // accept any finite whole-valued f64 (including -0.0, which JS renders
-    // as "0"). Reject everything else (NaN/Inf cannot occur by construction
-    // here, but `is_finite()` guards regardless).
-    if let Some(f) = n.as_f64() {
-        if f.is_finite() && f.fract() == 0.0 {
-            // Accept an integer-valued float (e.g. `2.0`, `-0`) only when it
-            // maps to an i64 exactly. A bare `f as i64` SATURATES at
-            // i64::MIN/MAX for out-of-range inputs, so distinct values such as
-            // 2e19 and 3e19 would both saturate to i64::MAX and lose their
-            // distinctness. Refusing ambiguous values keeps the canonical form
-            // injective, which is the property the hash relies on.
-            #[allow(clippy::cast_possible_truncation)]
-            let as_int = f as i64;
-            // Exact round-trip check: the float comparison is intentional, it
-            // verifies that no precision was lost (and that no saturation
-            // happened) before we trust `as_int`.
-            #[allow(clippy::cast_precision_loss, clippy::float_cmp)]
-            let round_trips = as_int as f64 == f;
-            // Also bound to the JS-safe range: a float at or beyond 2^53
-            // cannot distinguish adjacent integers, so accepting it would
-            // diverge from a JS verifier just as the integer path would.
-            if round_trips && (-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&as_int) {
-                out.extend_from_slice(as_int.to_string().as_bytes());
-                return Ok(());
-            }
-            return Err(CanonicalError::NumberOutOfRange(n.to_string()));
-        }
-    }
+    // Anything left is stored by serde_json as `f64`: a JSON number written
+    // with a decimal point or exponent (`2.0`, `-0`, `1e3`, `1.5`) or an
+    // integer literal that overflowed i64/u64. We REFUSE every such value,
+    // including integer-valued floats like `2.0`.
+    //
+    // Why not accept integer-valued floats and render them as integers:
+    // serde_json's decimal->f64 rounding diverges from a JavaScript
+    // `JSON.parse` for many inputs near 2^53 (e.g. the token
+    // `9007199254740991.0` parses to the f64 9007199254740990.0 under
+    // serde_json but to 9007199254740991 under V8). The original token text
+    // is gone by the time we hold a `serde_json::Number`, so we cannot
+    // recover the value a JS verifier would compute, and emitting serde's
+    // (possibly mis-rounded) value would silently break the cross-language
+    // byte-for-byte contract the canonical form exists to guarantee.
+    // Producers therefore encode integers as integer tokens and everything
+    // else (non-integers, large or float-typed values) as strings, exactly
+    // as the demo WAL does for monetary amounts.
     Err(CanonicalError::NonIntegerNumber(n.to_string()))
 }
 
@@ -338,31 +331,54 @@ mod tests {
     }
 
     #[test]
-    fn accepts_integer_valued_floats_like_node_is_integer() {
-        // serde_json parses bare `2.0` as f64; Node's Number.isInteger(2.0)
-        // is true and String(2.0) is "2". We mirror that exactly so a Node-
-        // produced canonical form and a Rust-produced one converge.
-        let result = canonical_json(&json!([1, 2.0_f64])).unwrap();
-        assert_eq!(String::from_utf8(result).unwrap(), "[1,2]");
+    fn rejects_float_syntax_numbers_including_integer_valued() {
+        // serde_json stores any number written with a decimal point or
+        // exponent as f64, and its decimal->f64 rounding diverges from a JS
+        // JSON.parse near 2^53 (e.g. 9007199254740991.0 -> ...990 in serde,
+        // ...991 in V8). The original token is gone by canonicalization time,
+        // so we cannot reproduce a JS verifier's value. We therefore refuse
+        // every float-syntax number, including integer-valued ones like 2.0,
+        // rather than emit bytes a JS reimplementation might not reproduce.
+        // Producers emit integers in integer syntax and everything else as
+        // strings.
+        assert!(matches!(
+            canonical_json(&json!(2.0_f64)),
+            Err(CanonicalError::NonIntegerNumber(_))
+        ));
+        assert!(matches!(
+            canonical_json(&json!([1, 2.0_f64])),
+            Err(CanonicalError::NonIntegerNumber(_))
+        ));
+        // The empirically-divergent case that motivated the refusal.
+        let near: Value = serde_json::from_str(r#"{"q":9007199254740991.0}"#).unwrap();
+        assert!(matches!(
+            canonical_json(&near),
+            Err(CanonicalError::NonIntegerNumber(_))
+        ));
+        // Integer SYNTAX of the same value is still accepted exactly.
+        let int_syntax: Value = serde_json::from_str(r#"{"q":9007199254740991}"#).unwrap();
+        assert_eq!(
+            String::from_utf8(canonical_json(&int_syntax).unwrap()).unwrap(),
+            r#"{"q":9007199254740991}"#
+        );
     }
 
     #[test]
     fn rejects_integer_valued_floats_outside_i64_range() {
-        // Regression: a saturating `f as i64` used to collapse every
-        // out-of-range integer-valued float to i64::MIN/MAX, so two distinct
-        // payloads (2e19 and 3e19) canonicalized to the same bytes, which the
-        // round-trip check now refuses so the canonical form stays injective.
+        // Out-of-range float-typed values are refused like every other
+        // float-syntax number (previously they were a NumberOutOfRange case;
+        // now the whole f64 path is refused as NonIntegerNumber).
         assert!(matches!(
             canonical_json(&json!(2.0e19_f64)),
-            Err(CanonicalError::NumberOutOfRange(_))
+            Err(CanonicalError::NonIntegerNumber(_))
         ));
         assert!(matches!(
             canonical_json(&json!(3.0e19_f64)),
-            Err(CanonicalError::NumberOutOfRange(_))
+            Err(CanonicalError::NonIntegerNumber(_))
         ));
         assert!(matches!(
             canonical_json(&json!(-2.0e19_f64)),
-            Err(CanonicalError::NumberOutOfRange(_))
+            Err(CanonicalError::NonIntegerNumber(_))
         ));
     }
 
@@ -509,9 +525,15 @@ mod tests {
         assert_eq!(canon(json!(1)), "1");
         assert_eq!(canon(json!(-1)), "-1");
         assert_eq!(canon(json!(1000000)), "1000000");
-        // Negative zero: serde_json parses to 0
+        // Negative zero is float-syntax: serde_json stores `-0` as f64 -0.0,
+        // which is refused along with every other float-syntax number. A JS
+        // verifier would render it "0", but the token is gone by the time we
+        // canonicalize, so we refuse rather than guess. Producers emit `0`.
         let v: Value = serde_json::from_str("-0").unwrap();
-        assert_eq!(canon(v), "0");
+        assert!(matches!(
+            canonical_json(&v),
+            Err(CanonicalError::NonIntegerNumber(_))
+        ));
     }
 
     #[test]

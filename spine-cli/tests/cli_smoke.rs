@@ -632,3 +632,84 @@ fn verify_malformed_trusted_pubkey_is_a_usage_error() {
     ]);
     assert_ne!(code(&out2), 2, "a well-formed pin is not a usage error");
 }
+
+#[test]
+fn export_csv_neutralizes_formula_injection() {
+    // event_type/source are attacker-controlled free text. A CSV cell that
+    // begins with = + - @ is a spreadsheet formula; the exporter must prefix
+    // such cells with a single quote so they render as literal text.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let line = json!({
+        "sequence": 1,
+        "timestamp_ns": 1_700_000_000_000_000_000i64,
+        "prev_hash": GENESIS_PREV_HASH,
+        "payload_hash": "ab".repeat(32),
+        "event_type": "=cmd|'/c calc'!A1",
+        "source": "+SUM(1+1)",
+    });
+    std::fs::write(dir.path().join("00000001.jsonl"), format!("{line}\n")).expect("write wal");
+
+    let out = run(&[
+        "export",
+        "--wal",
+        path_str(dir.path()),
+        "--export-format",
+        "csv",
+        "--format",
+        "quiet",
+    ]);
+    assert_eq!(code(&out), 0);
+    let body = stdout(&out);
+    assert!(
+        body.contains("'=cmd"),
+        "event_type formula must be quote-prefixed: {body}"
+    );
+    assert!(
+        body.contains("'+SUM"),
+        "source formula must be quote-prefixed: {body}"
+    );
+}
+
+#[test]
+fn export_syslog_escapes_unicode_line_separators() {
+    // U+2028 LINE SEPARATOR (and U+2029, U+0085) are line breaks outside the
+    // C0 range; a Unicode-newline-aware SIEM could split on them and accept a
+    // forged record. They must be escaped in the MSG body, not emitted raw,
+    // and must not add a syslog line.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let line = json!({
+        "sequence": 1,
+        "timestamp_ns": 1_700_000_000_000_000_000i64,
+        "prev_hash": GENESIS_PREV_HASH,
+        "payload_hash": "ab".repeat(32),
+        "event_type": "login\u{2028}<13>1 forged",
+        "source": "auth",
+    });
+    std::fs::write(dir.path().join("00000001.jsonl"), format!("{line}\n")).expect("write wal");
+
+    let out = run(&[
+        "export",
+        "--wal",
+        path_str(dir.path()),
+        "--export-format",
+        "syslog",
+        "--format",
+        "quiet",
+    ]);
+    assert_eq!(code(&out), 0);
+    let body = stdout(&out);
+    let lines: Vec<&str> = body.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "a U+2028 in event_type must not add a syslog line"
+    );
+    assert!(
+        body.contains("\\u2028"),
+        "U+2028 must be escaped, not raw: {body}"
+    );
+    assert!(
+        !body.contains('\u{2028}'),
+        "raw U+2028 must not survive in the output"
+    );
+}

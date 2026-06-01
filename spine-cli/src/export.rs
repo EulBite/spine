@@ -489,6 +489,23 @@ fn write_line_text(sink: &mut Sink, line: &str) -> Result<(), ExportCmdError> {
     }
 }
 
+/// Neutralize CSV formula injection. A spreadsheet (Excel, LibreOffice,
+/// Google Sheets) interprets a cell whose first character is `=`, `+`, `-`,
+/// `@`, a tab, or a carriage return as a formula, so attacker-controlled WAL
+/// fields like `event_type` or `source` (and a negative `timestamp_ns`, which
+/// starts with `-`) could execute on open. Prefix any such cell with a single
+/// quote so it renders as literal text, per the OWASP CSV-injection guidance.
+fn csv_safe(s: &str) -> String {
+    if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        let mut out = String::with_capacity(s.len() + 1);
+        out.push('\'');
+        out.push_str(s);
+        out
+    } else {
+        s.to_string()
+    }
+}
+
 fn write_csv_record<W: Write>(
     writer: &mut csv::Writer<W>,
     entry: &WalEntry,
@@ -500,27 +517,31 @@ fn write_csv_record<W: Write>(
     } else {
         "no"
     };
-    let event_type = entry.event_type.clone().unwrap_or_default();
-    let source = entry.source.clone().unwrap_or_default();
+    let sequence = entry.sequence.to_string();
+    let timestamp = csv_safe(&entry.timestamp_ns.to_string());
+    let event_type = csv_safe(&entry.event_type.clone().unwrap_or_default());
+    let source = csv_safe(&entry.source.clone().unwrap_or_default());
+    let payload_hash = csv_safe(&entry.payload_hash);
+    let prev_hash = csv_safe(&entry.prev_hash);
     if include_proofs {
         writer.write_record([
-            entry.sequence.to_string().as_str(),
-            entry.timestamp_ns.to_string().as_str(),
+            sequence.as_str(),
+            &timestamp,
             &event_type,
             &source,
-            &entry.payload_hash,
-            &entry.prev_hash,
+            &payload_hash,
+            &prev_hash,
             signed,
-            entry_hash,
+            &csv_safe(entry_hash),
         ])?;
     } else {
         writer.write_record([
-            entry.sequence.to_string().as_str(),
-            entry.timestamp_ns.to_string().as_str(),
+            sequence.as_str(),
+            &timestamp,
             &event_type,
             &source,
-            &entry.payload_hash,
-            &entry.prev_hash,
+            &payload_hash,
+            &prev_hash,
             signed,
         ])?;
     }
@@ -575,12 +596,17 @@ fn syslog_token(s: &str) -> String {
     }
 }
 
-/// Escape `"`, `\`, and C0 control characters (including CR/LF) for
-/// values that land inside the quoted MSG portion. RFC 3164 / 5424 do not
-/// specify escaping; this matches the convention most SIEMs (Splunk, ELK,
-/// `QRadar`) accept. Escaping the control characters is load-bearing: a
-/// newline in a producer-controlled field (e.g. `event_type`) would
-/// otherwise split the line and forge an extra syslog record.
+/// Escape `"`, `\`, C0 control characters (including CR/LF), and the Unicode
+/// line separators for values that land inside the quoted MSG portion. RFC
+/// 3164 / 5424 do not specify escaping; this matches the convention most
+/// SIEMs (Splunk, ELK, `QRadar`) accept. Escaping line-breaking characters is
+/// load-bearing: a newline in a producer-controlled field (e.g. `event_type`)
+/// would otherwise split the line and forge an extra syslog record. Besides
+/// the C0 CR/LF, the Unicode line separators U+0085 (NEL), U+2028 (LINE
+/// SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR) are escaped too, because a
+/// Unicode-newline-aware consumer (one that splits on the full Unicode
+/// line-break set or a `\R`-style regex) would otherwise treat them as record
+/// terminators.
 fn syslog_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -590,6 +616,11 @@ fn syslog_escape(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
+            // Unicode line separators outside the C0 range that a
+            // Unicode-aware SIEM could treat as a record boundary.
+            '\u{0085}' => out.push_str("\\u0085"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
             // Any other C0 control character could split or corrupt the
             // line; render it as a visible escape rather than emit it raw.
             c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),

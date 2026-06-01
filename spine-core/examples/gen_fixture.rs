@@ -126,7 +126,6 @@ fn canonical_cases() -> Vec<CanonicalCase> {
         ("flat_object_unsorted_keys", json!({"b": 1, "a": 2, "c": 3})),
         ("nested_object", json!({"outer": {"d": 4, "c": 3}, "a": 1})),
         ("array_preserves_order", json!([3, 1, 2])),
-        ("integer_valued_float", json!({"value": 2.0})),
         ("ascii_string", json!({"s": "hello world"})),
         (
             "named_escapes",
