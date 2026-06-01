@@ -47,6 +47,18 @@ demo-seeder/       Operational tool: generates a signed demo WAL on an
                    wasm bundle.
 ```
 
+## Verifying large WALs
+
+`spine-cli verify` streams the WAL one line at a time, so peak memory is
+flat regardless of size: on a 709 MB, 1M-record WAL it peaks at 4.4 MB.
+For routine re-checks, `--chain-only` (verify the hash chain and root,
+skip per-record signatures) runs about 9x faster, and
+`--sample-signatures N` spot-checks one record in every N. Full
+signature verification stays the default. See
+[docs/verifying-at-scale.md](docs/verifying-at-scale.md) for the
+measured numbers, the threat-model trade-offs of each policy, and the
+sub-linear proof-based model for the largest scenarios.
+
 ## What this verifies, and what it does not
 
 This codebase verifies that a given Spine WAL file is internally consistent and matches a pinned

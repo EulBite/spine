@@ -10,6 +10,7 @@
 //! enumeration without forcing the verifier core to recompile.
 
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -144,6 +145,62 @@ pub fn read_wal_bytes(dir: &Path) -> Result<Vec<u8>, WalIoError> {
         }
     }
     Ok(buf)
+}
+
+/// Stream every line of every WAL segment under `dir` to `visit`, in
+/// segment-then-line order, without ever holding more than one line (plus
+/// the read buffer) in memory.
+///
+/// This is the constant-memory counterpart to [`read_wal_bytes`]: where
+/// that helper concatenates the entire WAL into one `Vec<u8>` (peak memory
+/// scales with the WAL size, which does not work for a multi-gigabyte
+/// production WAL), this walks segments with a `BufReader` and a single
+/// reusable line buffer, so peak memory is flat regardless of total size.
+///
+/// Each line is passed WITHOUT its trailing `\n` (a trailing `\r` is left
+/// in place; the verifier tolerates it). `visit` returns `true` to stop
+/// early, which the lenient verifier uses for fail-fast.
+///
+/// Segment boundaries match [`read_wal_bytes`]: each segment's last line is
+/// kept separate from the next segment's first line, so a producer that
+/// omits the final newline on a segment cannot cause two records to merge.
+pub fn for_each_wal_line<F>(dir: &Path, mut visit: F) -> Result<(), WalIoError>
+where
+    F: FnMut(&[u8]) -> bool,
+{
+    let segments = collect_wal_segments(dir)?;
+    let mut line = Vec::new();
+    for seg in &segments {
+        let file = fs::File::open(seg).map_err(|e| WalIoError::Io {
+            path: seg.display().to_string(),
+            source: e,
+        })?;
+        let mut reader = BufReader::new(file);
+        loop {
+            line.clear();
+            let read = reader
+                .read_until(b'\n', &mut line)
+                .map_err(|e| WalIoError::Io {
+                    path: seg.display().to_string(),
+                    source: e,
+                })?;
+            if read == 0 {
+                break; // end of this segment
+            }
+            // `read_until` includes the delimiter; strip the trailing `\n`
+            // so the slice matches what `bytes.split(b'\n')` yields on the
+            // buffered path.
+            let end = if line.last() == Some(&b'\n') {
+                line.len() - 1
+            } else {
+                line.len()
+            };
+            if visit(&line[..end]) {
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Total byte size of every WAL segment under `dir`. Useful for the

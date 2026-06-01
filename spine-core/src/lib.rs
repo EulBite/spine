@@ -45,8 +45,8 @@ pub use receipt::{
     Receipt, ReceiptError, RECEIPT_DOMAIN_SEP,
 };
 pub use verify::{
-    verify_wal_bytes, verify_wal_bytes_with_options, LenientOptions, VerificationError,
-    VerificationResult,
+    verify_wal_bytes, verify_wal_bytes_with_options, LenientOptions, LenientVerifier,
+    SignaturePolicy, VerificationError, VerificationResult,
 };
 pub use verify_demo::{
     verify_demo_wal, DemoRecordEntry, DemoRecordOutcome, DemoReport, DemoStatus, InvalidReason,

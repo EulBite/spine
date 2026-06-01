@@ -129,6 +129,41 @@ fn write_strict_wal(dir: &Path) -> (String, String) {
     (pubkey_hex, root)
 }
 
+/// Build `n` correctly-chained, lenient-signed records (Ed25519 over the
+/// un-prefixed sign hash, the contract the default lenient verifier
+/// checks). Returns the serialized JSONL lines and the pubkey hex so a
+/// test can split them across segments however it likes.
+fn signed_lenient_lines(n: u64) -> (Vec<String>, String) {
+    let signing = SigningKey::from_bytes(&[9u8; 32]);
+    let pubkey_hex = hex::encode(signing.verifying_key().to_bytes());
+    let mut prev = GENESIS_PREV_HASH.to_string();
+    let mut ts: i64 = 1_700_000_000_000_000_000;
+    let mut out = Vec::new();
+    for seq in 1..=n {
+        ts += 1_000_000_000;
+        let payload = format!("payload-{seq}");
+        let payload_hash = hex::encode(blake3::hash(payload.as_bytes()).as_bytes());
+        let mut e = entry(seq, ts, &prev, &payload_hash);
+        // Sign hash ignores signature/public_key, so sign before setting them.
+        let sign_hash_hex = compute_entry_hash_for_signing(&e);
+        e.signature = Some(hex::encode(
+            signing.sign(sign_hash_hex.as_bytes()).to_bytes(),
+        ));
+        e.public_key = Some(pubkey_hex.clone());
+        prev = compute_entry_hash(&e);
+        out.push(serde_json::to_string(&e).expect("entry should serialize"));
+    }
+    (out, pubkey_hex)
+}
+
+/// Write a 4-entry lenient-signed WAL into `dir` as a single segment.
+fn write_signed_lenient_wal(dir: &Path) {
+    let (lines, _pubkey) = signed_lenient_lines(4);
+    let mut body = lines.join("\n");
+    body.push('\n');
+    std::fs::write(dir.join("00000001.jsonl"), body).expect("signed wal should write");
+}
+
 /// A non-valid strict record matching `outcome` and (optionally)
 /// `reason.kind`, if present in a strict JSON report.
 fn find_strict_record<'a>(report: &'a Value, outcome: &str, kind: &str) -> Option<&'a Value> {
@@ -712,4 +747,176 @@ fn export_syslog_escapes_unicode_line_separators() {
         !body.contains('\u{2028}'),
         "raw U+2028 must not survive in the output"
     );
+}
+
+#[test]
+fn verify_chain_only_passes_and_warns_about_skipped_signatures() {
+    // --chain-only walks the chain but verifies no signatures. On a
+    // valid chain it passes (exit 0) and must warn that signatures were
+    // not checked, so a green run can't be mistaken for a full verify.
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_signed_lenient_wal(dir.path());
+
+    let out = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--chain-only",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&out), 0);
+
+    let report: Value = serde_json::from_str(&stdout(&out)).expect("report should be JSON");
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["signatures_verified"], 0);
+    assert_eq!(report["signatures_skipped"], 4);
+    let warnings = report["warnings"].as_array().expect("warnings array");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().is_some_and(|s| s.contains("chain-only"))),
+        "chain-only must warn that signatures were not verified: {warnings:?}"
+    );
+}
+
+#[test]
+fn verify_chain_only_still_detects_a_chain_break() {
+    // Skipping signatures must NOT weaken chain tamper-evidence: a broken
+    // prev_hash link still fails the run.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let e1 = json!({
+        "sequence": 1,
+        "timestamp_ns": 1_700_000_000_000_000_000i64,
+        "prev_hash": GENESIS_PREV_HASH,
+        "payload_hash": "ab".repeat(32),
+    });
+    let e2 = json!({
+        "sequence": 2,
+        "timestamp_ns": 1_700_000_001_000_000_000i64,
+        "prev_hash": "ff".repeat(32),
+        "payload_hash": "cd".repeat(32),
+    });
+    std::fs::write(dir.path().join("00000001.jsonl"), format!("{e1}\n{e2}\n")).expect("write wal");
+
+    let out = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--chain-only",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(
+        code(&out),
+        1,
+        "a broken chain must fail even under chain-only"
+    );
+    let report: Value = serde_json::from_str(&stdout(&out)).expect("report should be JSON");
+    assert_eq!(report["valid"], false);
+}
+
+#[test]
+fn verify_chain_only_conflicts_with_pin_and_sample() {
+    let dir = wal_dir();
+    let pin = "ab".repeat(32);
+
+    let with_pin = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--chain-only",
+        "--trusted-pubkey",
+        &pin,
+    ]);
+    assert_eq!(
+        code(&with_pin),
+        2,
+        "--chain-only with --trusted-pubkey is a usage error"
+    );
+
+    let with_sample = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--chain-only",
+        "--sample-signatures",
+        "2",
+    ]);
+    assert_eq!(
+        code(&with_sample),
+        2,
+        "--chain-only with --sample-signatures is a usage error"
+    );
+}
+
+#[test]
+fn verify_sample_signatures_checks_only_the_sampled_subset() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_signed_lenient_wal(dir.path()); // sequences 1..=4
+
+    let out = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--sample-signatures",
+        "2",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&out), 0);
+
+    let report: Value = serde_json::from_str(&stdout(&out)).expect("report should be JSON");
+    assert_eq!(report["valid"], true);
+    // Sequences 2 and 4 are multiples of 2; 1 and 3 are skipped.
+    assert_eq!(report["signatures_verified"], 2);
+    assert_eq!(report["signatures_skipped"], 2);
+    let warnings = report["warnings"].as_array().expect("warnings array");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().is_some_and(|s| s.contains("1-in-2"))),
+        "sampling must disclose its partial coverage: {warnings:?}"
+    );
+}
+
+#[test]
+fn verify_sample_signatures_zero_is_a_usage_error() {
+    let dir = wal_dir();
+    let out = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--sample-signatures",
+        "0",
+    ]);
+    assert_eq!(code(&out), 2, "--sample-signatures 0 is a usage error");
+}
+
+#[test]
+fn verify_streams_across_segments_without_merging_records() {
+    // Streaming verification must keep segment boundaries: the last line
+    // of segment 1 (written WITHOUT a trailing newline) must not merge
+    // with the first line of segment 2. A full default verify over a
+    // signed chain split across two segments must pass.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (lines, _pubkey) = signed_lenient_lines(4);
+    std::fs::write(
+        dir.path().join("00000001.jsonl"),
+        format!("{}\n{}", lines[0], lines[1]), // no trailing newline
+    )
+    .expect("seg1 write");
+    std::fs::write(
+        dir.path().join("00000002.jsonl"),
+        format!("{}\n{}\n", lines[2], lines[3]),
+    )
+    .expect("seg2 write");
+
+    let out = run(&["verify", "--wal", path_str(dir.path()), "--format", "json"]);
+    assert_eq!(code(&out), 0, "stdout: {}", stdout(&out));
+
+    let report: Value = serde_json::from_str(&stdout(&out)).expect("report should be JSON");
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["events_verified"], 4);
+    assert_eq!(report["signatures_verified"], 4);
 }
