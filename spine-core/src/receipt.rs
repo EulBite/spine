@@ -10,10 +10,14 @@
 //! [`WalEntry`] proves the entry was written in a specific position by
 //! whoever held the WAL signing key. The receipt is a separate, layered
 //! attestation: only a holder of the server's private key can produce a
-//! valid `receipt_sig`. The two attestations are independent on purpose,
-//! so swapping a stored receipt without re-signing it is detectable as
-//! [`ReceiptError::SignatureInvalid`] even when the chain hash still
-//! checks out.
+//! valid `receipt_sig`. The two attestations are independent on purpose.
+//! Tampering with a stored receipt's fields is detectable as
+//! [`ReceiptError::SignatureInvalid`] (the signature no longer matches),
+//! and [`verify_receipt_signature`] additionally binds the receipt to the
+//! entry it sits on (its `payload_hash`, plus `event_id` when the entry
+//! declares one), so a genuine receipt issued for a different event cannot
+//! be replayed verbatim onto this entry: that surfaces as
+//! [`ReceiptError::EntryMismatch`].
 //!
 //! ## Canonical sign message
 //!
@@ -118,6 +122,11 @@ pub enum ReceiptError {
 
     #[error("Receipt at sequence {sequence} failed Ed25519 signature verification")]
     SignatureInvalid { sequence: u64 },
+
+    #[error(
+        "Receipt at sequence {sequence} attests to a different event than the entry it is attached to (mismatched {field})"
+    )]
+    EntryMismatch { sequence: u64, field: &'static str },
 
     #[error("Receipt at sequence {sequence}: failed to serialize canonical message: {details}")]
     CanonicalSerialize { sequence: u64, details: String },
@@ -255,6 +264,25 @@ pub fn verify_receipt_signature(
         None => Ok(false),
         Some(receipt) => {
             verify_receipt_against_keystore(entry.sequence, receipt, keystore)?;
+            // A valid signature only proves the receipt is an authentic
+            // server attestation for SOME event. Bind it to THIS entry so a
+            // genuine receipt issued for a different event cannot be
+            // replayed onto this one. payload_hash is always present on the
+            // entry; event_id is checked only when the entry declares it.
+            if receipt.payload_hash != entry.payload_hash {
+                return Err(ReceiptError::EntryMismatch {
+                    sequence: entry.sequence,
+                    field: "payload_hash",
+                });
+            }
+            if let Some(entry_event_id) = entry.event_id.as_deref() {
+                if receipt.event_id != entry_event_id {
+                    return Err(ReceiptError::EntryMismatch {
+                        sequence: entry.sequence,
+                        field: "event_id",
+                    });
+                }
+            }
             Ok(true)
         }
     }
@@ -505,6 +533,92 @@ mod tests {
         let keystore = Keystore::default();
         let got = verify_receipt_signature(&entry, &keystore).unwrap();
         assert!(!got);
+    }
+
+    fn entry_with_receipt(
+        payload_hash: String,
+        event_id: Option<&str>,
+        receipt: Receipt,
+    ) -> WalEntry {
+        use crate::wal_entry::GENESIS_PREV_HASH;
+        WalEntry {
+            format_version: 1,
+            sequence: 1,
+            timestamp_ns: 1000,
+            prev_hash: GENESIS_PREV_HASH.to_string(),
+            payload_hash,
+            event_type: None,
+            source: None,
+            signature: None,
+            public_key: None,
+            key_id: None,
+            event_id: event_id.map(str::to_string),
+            stream_id: None,
+            hash_alg: None,
+            payload: None,
+            receipt: Some(receipt),
+        }
+    }
+
+    #[test]
+    fn receipt_matching_its_entry_verifies() {
+        let signing_key = signing_key_seed(0x88);
+        let verifying_key = signing_key.verifying_key();
+        let mut receipt = sample_receipt();
+        receipt.payload_hash = "ab".repeat(32);
+        receipt.event_id = "evt-7".to_string();
+        sign_receipt(&mut receipt, &signing_key);
+        let keystore = Keystore::from_keys(std::iter::once((
+            receipt.server_key_id.clone(),
+            verifying_key,
+        )));
+        let entry = entry_with_receipt("ab".repeat(32), Some("evt-7"), receipt);
+        assert!(verify_receipt_signature(&entry, &keystore).unwrap());
+    }
+
+    #[test]
+    fn genuine_receipt_for_a_different_event_is_rejected_as_entry_mismatch() {
+        // A genuine, validly-signed receipt for event A copied VERBATIM onto
+        // an entry whose payload_hash differs must NOT verify: the signature
+        // is fine, but the receipt attests to a different event. This is the
+        // receipt-swap class the module comment promises to catch.
+        let signing_key = signing_key_seed(0x89);
+        let verifying_key = signing_key.verifying_key();
+        let mut receipt = sample_receipt();
+        receipt.payload_hash = "aa".repeat(32); // receipt attests to PA
+        sign_receipt(&mut receipt, &signing_key);
+        let keystore = Keystore::from_keys(std::iter::once((
+            receipt.server_key_id.clone(),
+            verifying_key,
+        )));
+        // Entry carries a DIFFERENT payload_hash (PB).
+        let entry = entry_with_receipt("bb".repeat(32), None, receipt);
+        match verify_receipt_signature(&entry, &keystore) {
+            Err(ReceiptError::EntryMismatch { field, sequence: 1 }) => {
+                assert_eq!(field, "payload_hash");
+            }
+            other => panic!("expected EntryMismatch on payload_hash, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn receipt_event_id_mismatch_is_rejected_when_entry_declares_event_id() {
+        let signing_key = signing_key_seed(0x8a);
+        let verifying_key = signing_key.verifying_key();
+        let mut receipt = sample_receipt();
+        receipt.payload_hash = "cd".repeat(32);
+        receipt.event_id = "evt-OTHER".to_string();
+        sign_receipt(&mut receipt, &signing_key);
+        let keystore = Keystore::from_keys(std::iter::once((
+            receipt.server_key_id.clone(),
+            verifying_key,
+        )));
+        // payload_hash matches but the entry declares a different event_id.
+        let entry = entry_with_receipt("cd".repeat(32), Some("evt-MINE"), receipt);
+        match verify_receipt_signature(&entry, &keystore) {
+            Err(ReceiptError::EntryMismatch { field, .. }) => assert_eq!(field, "event_id"),
+            other => panic!("expected EntryMismatch on event_id, got {other:?}"),
+        }
     }
 
     #[test]

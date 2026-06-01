@@ -68,11 +68,20 @@ pub fn run(
         None => None,
     };
 
+    // Validate the lenient pin up front: a malformed --trusted-pubkey must
+    // be a usage error (exit 2), not a silent fall-back to "no pin" with
+    // valid=true. The strict path already rejects a malformed pinned key;
+    // making lenient consistent stops a fat-fingered flag from failing open.
+    let trusted_pubkey = match trusted_pubkey {
+        Some(p) => Some(validate_trusted_pubkey(p)?),
+        None => None,
+    };
+
     let opts = LenientOptions {
         expected_root,
         keystore: keystore.as_ref(),
         fail_fast,
-        trusted_pubkey,
+        trusted_pubkey: trusted_pubkey.as_deref(),
     };
 
     // verify_wal_bytes_with_options no longer returns Err: the
@@ -175,6 +184,23 @@ fn normalize_hex(s: &str) -> String {
         .or_else(|| t.strip_prefix("0X"))
         .unwrap_or(t)
         .to_lowercase()
+}
+
+/// Validate the lenient `--trusted-pubkey`. It must normalize to 64 hex
+/// chars that decode to 32 bytes (an Ed25519 public key); returns the
+/// normalized lowercase hex on success. A malformed pin is a usage error
+/// rather than a silent degrade to record-declared keys, which would let a
+/// typo fail open (the core's decode-failure path only warns). Returning
+/// the normalized form means the core compares the same bytes regardless
+/// of an optional `0x` prefix or surrounding whitespace.
+fn validate_trusted_pubkey(raw: &str) -> Result<String, VerifyCmdError> {
+    let normalized = normalize_hex(raw);
+    match hex::decode(&normalized) {
+        Ok(bytes) if bytes.len() == 32 => Ok(normalized),
+        _ => Err(VerifyCmdError::Usage(format!(
+            "--trusted-pubkey must be 64 hex chars (a 32-byte Ed25519 public key); got {raw:?}"
+        ))),
+    }
 }
 
 fn emit_report(

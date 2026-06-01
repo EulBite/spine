@@ -50,7 +50,7 @@ pub use verify::{
 };
 pub use verify_demo::{
     verify_demo_wal, DemoRecordEntry, DemoRecordOutcome, DemoReport, DemoStatus, InvalidReason,
-    RejectedReason, MAX_PAYLOAD_BYTES, MAX_RECORDS_DEMO, STRICT_DOMAIN_SEP,
+    RejectedReason, MAX_LINE_BYTES, MAX_PAYLOAD_BYTES, MAX_RECORDS_DEMO, STRICT_DOMAIN_SEP,
 };
 pub use wal_entry::{
     compute_chain_root, compute_chain_root_from_entries, compute_entry_hash,

@@ -605,3 +605,30 @@ fn export_syslog_escapes_control_chars_in_event_type() {
         "the newline must be escaped, not emitted raw"
     );
 }
+
+#[test]
+fn verify_malformed_trusted_pubkey_is_a_usage_error() {
+    // A fat-fingered --trusted-pubkey must fail as a usage error (exit 2),
+    // not silently drop the pin and report the WAL as valid (exit 0).
+    let dir = wal_dir();
+    let out = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--trusted-pubkey",
+        "deadbeef", // 8 hex chars, not 64
+    ]);
+    assert_eq!(code(&out), 2, "malformed pin must be a usage error");
+
+    // A well-formed (64-hex) pin still runs and, on this unsigned WAL,
+    // reports issues (exit 1) rather than a usage error.
+    let good_pin = "ab".repeat(32);
+    let out2 = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--trusted-pubkey",
+        &good_pin,
+    ]);
+    assert_ne!(code(&out2), 2, "a well-formed pin is not a usage error");
+}

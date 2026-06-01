@@ -343,7 +343,25 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
                     }
                 }
             }
-            (None, None) => {}
+            (None, None) => {
+                // Lenient tolerates unsigned records by default, but when a
+                // trusted pubkey is pinned the operator is asserting that
+                // every record was signed by that key (see the
+                // --trusted-pubkey docs). An unsigned record violates that,
+                // so flag it instead of letting the gate pass.
+                if trusted_pubkey_bytes.is_some() {
+                    let err = VerificationError {
+                        sequence: Some(entry.sequence),
+                        error_type: "unsigned_record".to_string(),
+                        details: "record is unsigned but trusted_pubkey requires every record \
+                                  to be signed by the pinned key"
+                            .to_string(),
+                    };
+                    if push_or_halt(&mut result, err, opts.fail_fast) {
+                        break 'outer;
+                    }
+                }
+            }
             _ => {
                 // Asymmetric: signature OR pubkey set, not both.
                 // Aligned with the strict verifier's terminology so
@@ -392,6 +410,9 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
                         }
                         ReceiptError::SignatureInvalid { .. } => {
                             ("receipt_signature_invalid", err.to_string())
+                        }
+                        ReceiptError::EntryMismatch { .. } => {
+                            ("receipt_entry_mismatch", err.to_string())
                         }
                         ReceiptError::CanonicalSerialize { .. } => {
                             ("receipt_canonical_failed", err.to_string())
@@ -802,6 +823,25 @@ mod tests {
         // failure short-circuits the signature math, otherwise a wrong
         // pin shows up as a "broken signature" and confuses triage.
         assert!(!r.errors.iter().any(|e| e.error_type == "invalid_signature"));
+    }
+
+    #[test]
+    fn trusted_pubkey_flags_unsigned_records() {
+        // With a pin set, the lenient verifier asserts every record is
+        // signed by that key. A fully unsigned chain must NOT pass just
+        // because its links and (optional) root are consistent.
+        let entries = build_valid_chain(2); // unsigned
+        let bytes = to_jsonl(&entries);
+        let pin = hex::encode([0x55u8; 32]);
+        let opts = LenientOptions {
+            expected_root: None,
+            keystore: None,
+            fail_fast: false,
+            trusted_pubkey: Some(&pin),
+        };
+        let r = verify_wal_bytes_with_options(&bytes, &opts);
+        assert!(!r.valid);
+        assert!(r.errors.iter().any(|e| e.error_type == "unsigned_record"));
     }
 
     #[test]
