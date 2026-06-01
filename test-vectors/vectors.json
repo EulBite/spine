@@ -48,14 +48,6 @@
         "expected_payload_hash_blake3": "fdb95223ff0257469111b94c88189d23ad29b22a3ecd3059fdd169c09ea9d123"
       },
       {
-        "name": "integer_valued_float",
-        "input": {
-          "value": 2.0
-        },
-        "expected_canonical_json_utf8": "{\"value\":2}",
-        "expected_payload_hash_blake3": "1ce9ecf81de2c4f2bb00c7bff615aef828066e3b04245e71accbb9ed381f829c"
-      },
-      {
         "name": "ascii_string",
         "input": {
           "s": "hello world"

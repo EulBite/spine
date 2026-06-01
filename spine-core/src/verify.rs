@@ -467,12 +467,15 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
     // An attacker who empties the segment directory must not be able
     // to claim "valid: true" by virtue of producing zero records that
     // also produce zero failures.
-    if let Some(expected) = opts.expected_root {
-        let normalized = expected
-            .trim()
-            .strip_prefix("0x")
-            .unwrap_or(expected.trim())
-            .to_lowercase();
+    //
+    // A root that normalizes to empty (whitespace-only, or a bare `0x`) is
+    // treated as "no anchor supplied", matching the wasm facade so the same
+    // operator input is verified identically on the CLI and in the browser.
+    let normalized_root = opts
+        .expected_root
+        .map(crate::normalize_hex_anchor)
+        .filter(|s| !s.is_empty());
+    if let Some(normalized) = normalized_root {
         if result.chain_root != normalized {
             let computed = result.chain_root.clone();
             let err = VerificationError {
@@ -896,6 +899,33 @@ mod tests {
         let r = verify_wal_bytes(&bytes);
         assert!(r.valid);
         assert!(r.warnings.iter().any(|w| w.contains("No expected root")));
+    }
+
+    #[test]
+    fn whitespace_only_expected_root_is_treated_as_no_anchor() {
+        // A root that normalizes to empty (whitespace-only, or a bare 0x) is
+        // treated as "no anchor", matching the wasm facade so the CLI and the
+        // browser verify the same operator input identically. Previously the
+        // CLI compared "" against the chain_root and reported root_mismatch
+        // while the facade said valid.
+        let entries = build_valid_chain(2);
+        let bytes = to_jsonl(&entries);
+        for ws in ["   ", "\t", "0x", "  0X  "] {
+            let opts = LenientOptions {
+                expected_root: Some(ws),
+                keystore: None,
+                fail_fast: false,
+                trusted_pubkey: None,
+            };
+            let r = verify_wal_bytes_with_options(&bytes, &opts);
+            assert!(
+                r.valid,
+                "whitespace root {ws:?} should not fail: {:?}",
+                r.errors
+            );
+            assert!(!r.errors.iter().any(|e| e.error_type == "root_mismatch"));
+            assert!(r.warnings.iter().any(|w| w.contains("No expected root")));
+        }
     }
 
     #[test]
