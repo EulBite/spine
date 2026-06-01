@@ -57,7 +57,10 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        # Pinned, reproducible install instead of piping a live remote
+        # script into sh. Built from crates.io with the version bundled
+        # lockfile so the toolchain is deterministic and auditable.
+        run: cargo install wasm-pack --locked --version 0.14.0
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -89,7 +92,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        # Pinned, reproducible install instead of piping a live remote
+        # script into sh. Built from crates.io with the version bundled
+        # lockfile so the toolchain is deterministic and auditable.
+        run: cargo install wasm-pack --locked --version 0.14.0
 
       - uses: actions/setup-node@v6
         with:
