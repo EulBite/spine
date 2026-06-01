@@ -112,14 +112,17 @@ enum Commands {
         #[arg(long)]
         keystore: Option<PathBuf>,
 
-        /// 64-char lowercase hex of the Ed25519 pubkey that MUST have
-        /// signed every record. When set, any record whose
-        /// `public_key` differs is flagged as `untrusted_pubkey`
-        /// instead of being silently trusted. Without this flag the
-        /// lenient verifier trusts the record-declared pubkey (and
-        /// warns about it), which is sufficient for offline audit
-        /// but not for an enterprise CI gate. Under `--strict` this
-        /// is the externally pinned key and is mandatory.
+        /// 64-char hex of the Ed25519 pubkey that MUST have signed every
+        /// record (an optional `0x` prefix is accepted). When set, any
+        /// record whose `public_key` differs is flagged as
+        /// `untrusted_pubkey`, and any unsigned record is flagged as
+        /// `unsigned_record`, instead of being silently trusted. A
+        /// malformed value is a usage error (exit 2), not a silent
+        /// fall-back to record-declared keys. Without this flag the
+        /// lenient verifier trusts the record-declared pubkey (and warns
+        /// about it), which is sufficient for offline audit but not for
+        /// an enterprise CI gate. Under `--strict` this is the externally
+        /// pinned key and is mandatory.
         #[arg(long)]
         trusted_pubkey: Option<String>,
 

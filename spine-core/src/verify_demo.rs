@@ -50,10 +50,13 @@
 //!
 //! ## DoS limits
 //!
-//! [`MAX_RECORDS_DEMO`] and [`MAX_PAYLOAD_BYTES`] cap the input. They
-//! are public so the host page can pre-flight a fetch and abort
-//! before invoking the verifier. They do NOT apply to the lenient CLI
-//! path, where production WALs can be arbitrarily large.
+//! [`MAX_RECORDS_DEMO`], [`MAX_LINE_BYTES`], and [`MAX_PAYLOAD_BYTES`]
+//! bound the input. [`MAX_LINE_BYTES`] is checked BEFORE a line is parsed,
+//! so a single oversized line cannot force an unbounded parse or
+//! canonicalization; [`MAX_PAYLOAD_BYTES`] then bounds the canonical
+//! payload size. They are public so the host page can pre-flight a fetch
+//! and abort before invoking the verifier. They do NOT apply to the
+//! lenient CLI path, where production WALs can be arbitrarily large.
 
 use blake3::Hasher;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -76,9 +79,19 @@ pub const STRICT_DOMAIN_SEP: &[u8] = b"spine-wal-v1\x00";
 pub const MAX_RECORDS_DEMO: usize = 100_000;
 
 /// Hard cap on the canonical JSON byte length of any single payload.
-/// Strict refuses anything larger so a malicious manifest cannot
-/// freeze the host page on parse.
+/// Strict refuses anything larger. The cost of *producing* that canonical
+/// form is bounded separately by [`MAX_LINE_BYTES`], which is checked
+/// before the line is parsed.
 pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
+
+/// Hard cap on the raw byte length of a single WAL line, checked BEFORE
+/// the line is parsed. Without it, [`MAX_PAYLOAD_BYTES`] and
+/// [`MAX_RECORDS_DEMO`] only bound the *result* of parsing, not its cost:
+/// a single multi-megabyte line would be fully parsed (and its payload
+/// canonicalized) before the payload cap could reject it. The limit is
+/// generous (16x the payload cap) so any record with a <= 64 KiB canonical
+/// payload fits even with whitespace and envelope overhead.
+pub const MAX_LINE_BYTES: usize = 16 * MAX_PAYLOAD_BYTES;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -141,6 +154,7 @@ pub enum RejectedReason {
     PubkeyMalformed { details: String },
     NoPayload,
     PayloadTooLarge { bytes: usize, limit: usize },
+    LineTooLarge { bytes: usize, limit: usize },
     NonCanonicalPayload { details: String },
     TooManyRecords { limit: usize },
 }
@@ -231,6 +245,24 @@ pub fn verify_demo_wal(
                 outcome: DemoRecordOutcome::Rejected {
                     reason: RejectedReason::TooManyRecords {
                         limit: MAX_RECORDS_DEMO,
+                    },
+                },
+            });
+            halted = true;
+            break;
+        }
+
+        // Bound the raw line length BEFORE parsing, so a single oversized
+        // line cannot force an unbounded parse + canonicalization. The
+        // payload cap below only bounds the result size, not the work.
+        if line.len() > MAX_LINE_BYTES {
+            let seq = prev_sequence.map(|s| s + 1).unwrap_or(record_count as u64);
+            report.records.push(DemoRecordEntry {
+                sequence: seq,
+                outcome: DemoRecordOutcome::Rejected {
+                    reason: RejectedReason::LineTooLarge {
+                        bytes: line.len(),
+                        limit: MAX_LINE_BYTES,
                     },
                 },
             });
@@ -905,6 +937,24 @@ mod tests {
         assert!(matches!(
             report.records[1].outcome,
             DemoRecordOutcome::Invalid { .. }
+        ));
+    }
+
+    #[test]
+    fn oversized_line_is_rejected_before_parsing() {
+        let (_, pk_hex) = signer_keypair(0xB0);
+        // A single line longer than MAX_LINE_BYTES is refused before any
+        // parse or canonicalization runs. The bytes here are not even valid
+        // JSON, which is the point: the guard fires first.
+        let mut bytes = vec![b'a'; MAX_LINE_BYTES + 1];
+        bytes.push(b'\n');
+        let report = verify_demo_wal(&bytes, &pk_hex, FAKE_ROOT_HEX, 1);
+        assert_eq!(report.status, DemoStatus::Invalid);
+        assert!(matches!(
+            &report.records.last().unwrap().outcome,
+            DemoRecordOutcome::Rejected {
+                reason: RejectedReason::LineTooLarge { .. }
+            }
         ));
     }
 }
