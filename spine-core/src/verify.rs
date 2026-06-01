@@ -179,7 +179,7 @@ impl SignaturePolicy {
         match self {
             SignaturePolicy::All => true,
             SignaturePolicy::None => false,
-            SignaturePolicy::Sample { one_in } => one_in != 0 && sequence % one_in == 0,
+            SignaturePolicy::Sample { one_in } => one_in != 0 && sequence.is_multiple_of(one_in),
         }
     }
 }
