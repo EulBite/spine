@@ -137,6 +137,27 @@ enum Commands {
         #[arg(long)]
         strict: bool,
 
+        /// Verify chain linkage, sequence, timestamps and root only;
+        /// skip per-record Ed25519 signature verification. Signature
+        /// checks dominate the cost on a large WAL, so this is much
+        /// faster while still streaming at constant memory. It retains
+        /// tamper-evidence only when paired with an authenticated
+        /// `--expected-root`; without one it proves internal
+        /// self-consistency. Lenient profile only; incompatible with
+        /// `--trusted-pubkey`, `--keystore` and `--sample-signatures`.
+        #[arg(long)]
+        chain_only: bool,
+
+        /// Spot-check signatures by verifying one record in every N
+        /// (those whose `sequence` is a multiple of N) instead of all
+        /// of them. A routine check for accidental corruption or a
+        /// wrong-key rollout, NOT a defense against a targeted forger
+        /// who can avoid the sampled positions; a sampled signature
+        /// that fails still fails the run. Lenient profile only;
+        /// incompatible with `--chain-only`.
+        #[arg(long, value_name = "N")]
+        sample_signatures: Option<u64>,
+
         /// Manifest version echoed into the strict report so a
         /// consumer can pin the exact contract it expects. Strict
         /// profile only; ignored in lenient mode.
@@ -234,6 +255,8 @@ fn main() -> ExitCode {
             keystore,
             trusted_pubkey,
             strict,
+            chain_only,
+            sample_signatures,
             manifest_version,
         } => verify::run(
             &wal,
@@ -243,6 +266,8 @@ fn main() -> ExitCode {
             keystore.as_deref(),
             trusted_pubkey.as_deref(),
             strict,
+            chain_only,
+            sample_signatures,
             manifest_version,
             cli.format,
         )

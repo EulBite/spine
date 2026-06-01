@@ -7,11 +7,11 @@ use std::fs;
 use std::path::Path;
 
 use spine_core::{
-    verify_demo_wal, verify_wal_bytes_with_options, DemoRecordOutcome, DemoReport, DemoStatus,
-    Keystore, LenientOptions, VerificationResult,
+    verify_demo_wal, DemoRecordOutcome, DemoReport, DemoStatus, Keystore, LenientOptions,
+    LenientVerifier, SignaturePolicy, VerificationResult,
 };
 
-use crate::wal_io::{read_wal_bytes, WalIoError};
+use crate::wal_io::{for_each_wal_line, read_wal_bytes, WalIoError};
 use crate::OutputFormat;
 
 #[derive(Debug, thiserror::Error)]
@@ -44,12 +44,43 @@ pub fn run(
     keystore_path: Option<&Path>,
     trusted_pubkey: Option<&str>,
     strict: bool,
+    chain_only: bool,
+    sample_signatures: Option<u64>,
     manifest_version: u32,
     format: OutputFormat,
 ) -> Result<bool, VerifyCmdError> {
-    let bytes = read_wal_bytes(wal_path)?;
+    // Reduced signature policies are a lenient-profile feature: the strict
+    // profile verifies every signature of the (capped) demo WAL by
+    // contract, so a request to skip or sample them there is a usage error.
+    if strict && (chain_only || sample_signatures.is_some()) {
+        return Err(VerifyCmdError::Usage(
+            "--chain-only and --sample-signatures apply to the lenient profile only; \
+             strict verifies every signature"
+                .to_string(),
+        ));
+    }
+    if chain_only && sample_signatures.is_some() {
+        return Err(VerifyCmdError::Usage(
+            "choose either --chain-only or --sample-signatures, not both".to_string(),
+        ));
+    }
+    if chain_only && (trusted_pubkey.is_some() || keystore_path.is_some()) {
+        return Err(VerifyCmdError::Usage(
+            "--chain-only skips per-record signature and receipt checks; remove \
+             --trusted-pubkey/--keystore (or drop --chain-only to verify them)"
+                .to_string(),
+        ));
+    }
+    if sample_signatures == Some(0) {
+        return Err(VerifyCmdError::Usage(
+            "--sample-signatures N requires N >= 1".to_string(),
+        ));
+    }
 
     if strict {
+        // Strict is capped at MAX_RECORDS_DEMO records, so buffering the
+        // whole WAL is bounded; only the lenient path needs streaming.
+        let bytes = read_wal_bytes(wal_path)?;
         return run_strict(
             &bytes,
             expected_root,
@@ -77,6 +108,14 @@ pub fn run(
         None => None,
     };
 
+    let policy = if chain_only {
+        SignaturePolicy::None
+    } else if let Some(n) = sample_signatures {
+        SignaturePolicy::Sample { one_in: n }
+    } else {
+        SignaturePolicy::All
+    };
+
     let opts = LenientOptions {
         expected_root,
         keystore: keystore.as_ref(),
@@ -84,11 +123,13 @@ pub fn run(
         trusted_pubkey: trusted_pubkey.as_deref(),
     };
 
-    // verify_wal_bytes_with_options no longer returns Err: the
-    // partial report (records up to a fail-fast halt, plus the
-    // failing error in result.errors) is always emitted. We just
-    // surface it as-is.
-    let mut result = verify_wal_bytes_with_options(&bytes, &opts);
+    // Stream the WAL one line at a time so peak memory stays flat
+    // regardless of total size: the verifier holds only the running
+    // chain state (one line buffer plus a few hashes), not the WAL.
+    // process_line returns true under fail-fast to stop early.
+    let mut verifier = LenientVerifier::new(&opts, policy);
+    for_each_wal_line(wal_path, |line| verifier.process_line(line))?;
+    let mut result = verifier.finish();
     maybe_add_profile_hint(&mut result);
 
     emit_report(&result, output_path, format)?;
@@ -328,6 +369,9 @@ fn print_text_report(result: &VerificationResult) {
     }
     println!("Events verified:     {}", result.events_verified);
     println!("Signatures verified: {}", result.signatures_verified);
+    if result.signatures_skipped > 0 {
+        println!("Signatures skipped:  {}", result.signatures_skipped);
+    }
     println!("Receipts verified:   {}", result.receipts_verified);
     if let (Some(first), Some(last)) = (result.first_sequence, result.last_sequence) {
         println!("Sequence range:      {first}..={last}");

@@ -72,7 +72,7 @@
 //! on every signed entry.
 //!
 //! Receipt failures observed inside the loop are translated to
-//! [`VerificationError`] entries (via the internal `push_or_halt`)
+//! [`VerificationError`] entries (via the internal `LenientVerifier::push`)
 //! rather than bubbling up as a dedicated error variant. Keystore
 //! loading itself lives in the CLI layer that calls
 //! [`Keystore::load_from_file`], which surfaces failures as
@@ -98,6 +98,13 @@ pub struct VerificationResult {
     pub valid: bool,
     pub events_verified: u64,
     pub signatures_verified: u64,
+    /// Records that carried signature material but were NOT individually
+    /// verified because a reduced [`SignaturePolicy`] was in effect
+    /// (chain-only or sampling). Always `0` under the default
+    /// [`SignaturePolicy::All`]. A non-zero value means signature
+    /// coverage was deliberately partial; the result carries a warning
+    /// spelling out what that means for the threat model.
+    pub signatures_skipped: u64,
     pub receipts_verified: u64,
     pub chain_root: String,
     pub first_sequence: Option<u64>,
@@ -126,6 +133,57 @@ pub struct VerificationError {
     pub details: String,
 }
 
+/// How aggressively the lenient verifier checks per-record Ed25519
+/// signatures.
+///
+/// Signature verification dominates the cost of a large WAL: walking
+/// the hash chain and parsing JSON is roughly an order of magnitude
+/// cheaper than verifying one Ed25519 signature per record. An auditor
+/// who only needs chain-and-root integrity, or a routine spot-check,
+/// can trade signature coverage for speed with this knob.
+///
+/// It governs ONLY whether the Ed25519 math runs. The chain link,
+/// sequence, timestamp, hash-format and `expected_root` checks always
+/// run in full regardless of the policy: reducing signature coverage
+/// never weakens the chain's own tamper-evidence.
+///
+/// This policy is selected through [`LenientVerifier::new`]. The
+/// buffered convenience entry points ([`verify_wal_bytes`],
+/// [`verify_wal_bytes_with_options`]) always use [`SignaturePolicy::All`]
+/// so the WASM playground and the published cross-language vectors keep
+/// verifying every signature.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SignaturePolicy {
+    /// Verify every signed record's signature. The default, and the
+    /// only policy that defends against a targeted forger.
+    #[default]
+    All,
+    /// Verify no signatures: walk the chain, sequence, timestamps and
+    /// root only. Fastest. Retains tamper-evidence only when paired
+    /// with an authenticated `expected_root`; without one it proves
+    /// internal self-consistency, nothing more.
+    None,
+    /// Verify one record in every `one_in` (those whose `sequence` is a
+    /// multiple of `one_in`). A routine spot-check for accidental
+    /// corruption or a wrong-key rollout, NOT a defense against a
+    /// targeted forger who can simply avoid the sampled positions. A
+    /// sampled signature that fails still fails the whole run. `one_in`
+    /// of `0` checks nothing (treated as "no sampling").
+    Sample { one_in: u64 },
+}
+
+impl SignaturePolicy {
+    /// Whether the record at `sequence` should have its signature
+    /// verified under this policy.
+    fn should_check(self, sequence: u64) -> bool {
+        match self {
+            SignaturePolicy::All => true,
+            SignaturePolicy::None => false,
+            SignaturePolicy::Sample { one_in } => one_in != 0 && sequence % one_in == 0,
+        }
+    }
+}
+
 /// Knobs for the lenient verifier. `Default` gives the accumulate-all
 /// behaviour with no keystore, no trusted pubkey pin, and no expected
 /// root.
@@ -149,6 +207,7 @@ fn empty_result() -> VerificationResult {
         valid: true,
         events_verified: 0,
         signatures_verified: 0,
+        signatures_skipped: 0,
         receipts_verified: 0,
         chain_root: String::new(),
         first_sequence: None,
@@ -173,40 +232,108 @@ pub fn verify_wal_bytes_with_options(bytes: &[u8], opts: &LenientOptions) -> Ver
 }
 
 fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
-    let mut result = empty_result();
+    // The buffered entry points always verify every signature: the WASM
+    // playground and the published cross-language vectors depend on it.
+    // Streaming callers that want a reduced policy build a
+    // `LenientVerifier` directly.
+    let mut verifier = LenientVerifier::new(opts, SignaturePolicy::All);
+    for line in bytes.split(|&b| b == b'\n') {
+        if verifier.process_line(line) {
+            break;
+        }
+    }
+    verifier.finish()
+}
 
-    // Used by the trusted-pubkey gate. Decoded once so we don't pay
-    // the hex-decode cost per record. Bad input here lands in the
-    // result.warnings list and degrades to "no pin" semantics: the
-    // alternative is failing every record with a config error, but
-    // the warning path is friendlier for someone who fat-fingered
-    // the flag.
-    let trusted_pubkey_bytes: Option<[u8; 32]> = match opts.trusted_pubkey {
-        Some(s) => match decode_hex_32(s) {
-            Ok(b) => Some(b),
-            Err(e) => {
-                result.warnings.push(format!(
-                    "trusted_pubkey is not a valid 32-byte hex string ({e}); falling back to record-declared pubkeys"
-                ));
-                None
-            }
-        },
-        None => None,
-    };
+/// Incremental lenient verifier for streaming a WAL one line at a time.
+///
+/// [`verify_wal_bytes`] / [`verify_wal_bytes_with_options`] materialise
+/// the whole WAL as a byte slice, which is the right tool for the WASM
+/// playground and small inputs. A multi-gigabyte production WAL does
+/// not fit comfortably in memory, so the CLI feeds segments line by
+/// line through this type: peak memory stays flat (one line buffer plus
+/// the running chain state) instead of scaling with the WAL size.
+///
+/// Both surfaces drive this exact state machine, so the streaming and
+/// buffered paths can never silently diverge: `verify_internal` is just
+/// a `split('\n')` loop over [`process_line`].
+///
+/// Usage: [`LenientVerifier::new`], then call [`process_line`] for each
+/// line (stop early when it returns `true`, the fail-fast signal), then
+/// [`finish`] to obtain the [`VerificationResult`].
+///
+/// [`process_line`]: LenientVerifier::process_line
+/// [`finish`]: LenientVerifier::finish
+pub struct LenientVerifier<'a> {
+    opts: LenientOptions<'a>,
+    policy: SignaturePolicy,
+    /// Decoded once in [`new`](LenientVerifier::new) so we do not pay
+    /// the hex-decode cost per record. A malformed pin degrades to "no
+    /// pin" semantics with a warning rather than failing every record.
+    trusted_pubkey_bytes: Option<[u8; 32]>,
+    result: VerificationResult,
+    prev_entry: Option<WalEntry>,
+    prev_sequence: Option<u64>,
+    prev_timestamp: Option<i64>,
+    running_hash: Hasher,
+    receipts_seen: u64,
+    signatures_unpinned: u64,
+    /// 1-based index of the line most recently passed to
+    /// [`process_line`](LenientVerifier::process_line), used to quote
+    /// the offending line in `parse_error` details. Counts every line
+    /// fed (including skipped whitespace lines) so the number matches
+    /// the buffered path's `split('\n')` enumeration exactly.
+    line_counter: usize,
+}
 
-    let mut prev_entry: Option<WalEntry> = None;
-    let mut prev_sequence: Option<u64> = None;
-    let mut prev_timestamp: Option<i64> = None;
-    let mut running_hash = Hasher::new();
-    let mut receipts_seen: u64 = 0;
-    let mut signatures_unpinned: u64 = 0;
+impl<'a> LenientVerifier<'a> {
+    /// Build a verifier for `opts` under `policy`. No bytes are
+    /// processed yet; feed lines with
+    /// [`process_line`](LenientVerifier::process_line).
+    pub fn new(opts: &LenientOptions<'a>, policy: SignaturePolicy) -> Self {
+        let mut result = empty_result();
+        let trusted_pubkey_bytes: Option<[u8; 32]> = match opts.trusted_pubkey {
+            Some(s) => match decode_hex_32(s) {
+                Ok(b) => Some(b),
+                Err(e) => {
+                    result.warnings.push(format!(
+                        "trusted_pubkey is not a valid 32-byte hex string ({e}); falling back to record-declared pubkeys"
+                    ));
+                    None
+                }
+            },
+            None => None,
+        };
+        Self {
+            opts: *opts,
+            policy,
+            trusted_pubkey_bytes,
+            result,
+            prev_entry: None,
+            prev_sequence: None,
+            prev_timestamp: None,
+            running_hash: Hasher::new(),
+            receipts_seen: 0,
+            signatures_unpinned: 0,
+            line_counter: 0,
+        }
+    }
 
-    'outer: for (line_idx, line) in bytes.split(|&b| b == b'\n').enumerate() {
+    /// Process one line of the WAL. The line must NOT include its
+    /// trailing newline; a trailing `\r` is tolerated (CRLF WALs).
+    /// Whitespace-only lines are skipped.
+    ///
+    /// Returns `true` when the caller should stop feeding lines: this
+    /// happens only under [`LenientOptions::fail_fast`] after the first
+    /// failure. Under the default accumulate-all policy it always
+    /// returns `false`.
+    pub fn process_line(&mut self, line: &[u8]) -> bool {
+        self.line_counter += 1;
+        let line_num = self.line_counter;
         let line_trim_end = trim_trailing_cr(line);
         if line_trim_end.iter().all(|b| b.is_ascii_whitespace()) {
-            continue;
+            return false;
         }
-        let line_num = line_idx + 1;
 
         let entry: WalEntry = match serde_json::from_slice(line_trim_end) {
             Ok(e) => e,
@@ -216,24 +343,21 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
                     error_type: "parse_error".to_string(),
                     details: format!("line {line_num}: {e}"),
                 };
-                if push_or_halt(&mut result, err, opts.fail_fast) {
-                    break 'outer;
-                }
-                continue;
+                return self.push(err);
             }
         };
 
-        if result.first_sequence.is_none() {
-            result.first_sequence = Some(entry.sequence);
-            result.first_timestamp = Some(entry.timestamp_ns);
+        if self.result.first_sequence.is_none() {
+            self.result.first_sequence = Some(entry.sequence);
+            self.result.first_timestamp = Some(entry.timestamp_ns);
         }
-        result.last_sequence = Some(entry.sequence);
-        result.last_timestamp = Some(entry.timestamp_ns);
+        self.result.last_sequence = Some(entry.sequence);
+        self.result.last_timestamp = Some(entry.timestamp_ns);
 
         // Chain-link rule reused from wal_entry::verify_chain_link so
         // a future refactor can't silently fork the lenient path from
         // the canonical contract.
-        match verify_chain_link(&entry, prev_entry.as_ref()) {
+        match verify_chain_link(&entry, self.prev_entry.as_ref()) {
             HashVerification::Valid => {}
             HashVerification::InvalidGenesis { reason } => {
                 let err = VerificationError {
@@ -241,8 +365,8 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
                     error_type: "invalid_genesis".to_string(),
                     details: reason,
                 };
-                if push_or_halt(&mut result, err, opts.fail_fast) {
-                    break 'outer;
+                if self.push(err) {
+                    return true;
                 }
             }
             HashVerification::Mismatch { expected, actual } => {
@@ -251,13 +375,13 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
                     error_type: "chain_break".to_string(),
                     details: format!("expected prev_hash {expected}, found {actual}"),
                 };
-                if push_or_halt(&mut result, err, opts.fail_fast) {
-                    break 'outer;
+                if self.push(err) {
+                    return true;
                 }
             }
         }
 
-        if let Some(prev_seq) = prev_sequence {
+        if let Some(prev_seq) = self.prev_sequence {
             // saturating_add: a hostile record can carry sequence = u64::MAX
             // (it fails the genesis check, but in accumulate-all mode the
             // chain still advances and records it as prev_sequence), and a
@@ -273,117 +397,121 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
                         entry.sequence
                     ),
                 };
-                if push_or_halt(&mut result, err, opts.fail_fast) {
-                    break 'outer;
+                if self.push(err) {
+                    return true;
                 }
             }
         }
 
-        if let Some(prev_ts) = prev_timestamp {
+        if let Some(prev_ts) = self.prev_timestamp {
             if entry.timestamp_ns < prev_ts {
                 let err = VerificationError {
                     sequence: Some(entry.sequence),
                     error_type: "timestamp_regression".to_string(),
                     details: format!("timestamp {} < previous {prev_ts}", entry.timestamp_ns),
                 };
-                if push_or_halt(&mut result, err, opts.fail_fast) {
-                    break 'outer;
+                if self.push(err) {
+                    return true;
                 }
             }
         }
 
-        match (entry.signature.as_deref(), entry.public_key.as_deref()) {
-            (Some(sig_hex), Some(pk_hex)) => {
-                if let Some(ref pin) = trusted_pubkey_bytes {
-                    match decode_hex_32(pk_hex) {
-                        Ok(pk_bytes) if pk_bytes.ct_eq(pin).unwrap_u8() == 1 => {}
-                        _ => {
+        // The signature policy gates ONLY the Ed25519 math (the dominant
+        // per-record cost). Every other check above and below runs in
+        // full regardless, so a reduced policy never weakens the chain's
+        // tamper-evidence, only the signature coverage.
+        if self.policy.should_check(entry.sequence) {
+            match (entry.signature.as_deref(), entry.public_key.as_deref()) {
+                (Some(sig_hex), Some(pk_hex)) => {
+                    if let Some(ref pin) = self.trusted_pubkey_bytes {
+                        match decode_hex_32(pk_hex) {
+                            Ok(pk_bytes) if pk_bytes.ct_eq(pin).unwrap_u8() == 1 => {}
+                            _ => {
+                                let err = VerificationError {
+                                    sequence: Some(entry.sequence),
+                                    error_type: "untrusted_pubkey".to_string(),
+                                    details: "record public_key does not match trusted_pubkey pin"
+                                        .to_string(),
+                                };
+                                if self.push(err) {
+                                    return true;
+                                }
+                                // Skip the signature math: it would either
+                                // pass (and look "valid" under a wrong key)
+                                // or fail (and surface as InvalidSignature,
+                                // a misleading reason). Trusted-pubkey
+                                // failures are reason enough on their own.
+                                self.advance_chain(entry);
+                                return false;
+                            }
+                        }
+                    }
+                    match verify_entry_signature(&entry, sig_hex, pk_hex) {
+                        Ok(true) => {
+                            self.result.signatures_verified += 1;
+                            if self.trusted_pubkey_bytes.is_none() {
+                                self.signatures_unpinned += 1;
+                            }
+                        }
+                        Ok(false) | Err(()) => {
                             let err = VerificationError {
                                 sequence: Some(entry.sequence),
-                                error_type: "untrusted_pubkey".to_string(),
-                                details: "record public_key does not match trusted_pubkey pin"
-                                    .to_string(),
+                                error_type: "invalid_signature".to_string(),
+                                details: "Ed25519 verification failed".to_string(),
                             };
-                            if push_or_halt(&mut result, err, opts.fail_fast) {
-                                break 'outer;
+                            if self.push(err) {
+                                return true;
                             }
-                            // Skip the signature math: it would either
-                            // pass (and look "valid" under a wrong key)
-                            // or fail (and surface as InvalidSignature,
-                            // a misleading reason). Trusted-pubkey
-                            // failures are reason enough on their own.
-                            advance_chain(
-                                &mut result,
-                                &mut prev_entry,
-                                &mut prev_sequence,
-                                &mut prev_timestamp,
-                                &mut running_hash,
-                                entry,
-                            );
-                            continue;
                         }
                     }
                 }
-                match verify_entry_signature(&entry, sig_hex, pk_hex) {
-                    Ok(true) => {
-                        result.signatures_verified += 1;
-                        if trusted_pubkey_bytes.is_none() {
-                            signatures_unpinned += 1;
-                        }
-                    }
-                    Ok(false) | Err(()) => {
+                (None, None) => {
+                    // Lenient tolerates unsigned records by default, but when a
+                    // trusted pubkey is pinned the operator is asserting that
+                    // every record was signed by that key (see the
+                    // --trusted-pubkey docs). An unsigned record violates that,
+                    // so flag it instead of letting the gate pass.
+                    if self.trusted_pubkey_bytes.is_some() {
                         let err = VerificationError {
                             sequence: Some(entry.sequence),
-                            error_type: "invalid_signature".to_string(),
-                            details: "Ed25519 verification failed".to_string(),
+                            error_type: "unsigned_record".to_string(),
+                            details: "record is unsigned but trusted_pubkey requires every record \
+                                      to be signed by the pinned key"
+                                .to_string(),
                         };
-                        if push_or_halt(&mut result, err, opts.fail_fast) {
-                            break 'outer;
+                        if self.push(err) {
+                            return true;
                         }
                     }
                 }
-            }
-            (None, None) => {
-                // Lenient tolerates unsigned records by default, but when a
-                // trusted pubkey is pinned the operator is asserting that
-                // every record was signed by that key (see the
-                // --trusted-pubkey docs). An unsigned record violates that,
-                // so flag it instead of letting the gate pass.
-                if trusted_pubkey_bytes.is_some() {
+                _ => {
+                    // Asymmetric: signature OR pubkey set, not both.
+                    // Aligned with the strict verifier's terminology so
+                    // downstream triage by error_type is uniform across
+                    // the two profiles. The "the producer half-set the
+                    // signature material" case is fundamentally an
+                    // unsigned record, not a failed verification.
                     let err = VerificationError {
                         sequence: Some(entry.sequence),
                         error_type: "unsigned_record".to_string(),
-                        details: "record is unsigned but trusted_pubkey requires every record \
-                                  to be signed by the pinned key"
+                        details: "signature and public_key must both be present or both absent"
                             .to_string(),
                     };
-                    if push_or_halt(&mut result, err, opts.fail_fast) {
-                        break 'outer;
+                    if self.push(err) {
+                        return true;
                     }
                 }
             }
-            _ => {
-                // Asymmetric: signature OR pubkey set, not both.
-                // Aligned with the strict verifier's terminology so
-                // downstream triage by error_type is uniform across
-                // the two profiles. The "the producer half-set the
-                // signature material" case is fundamentally an
-                // unsigned record, not a failed verification.
-                let err = VerificationError {
-                    sequence: Some(entry.sequence),
-                    error_type: "unsigned_record".to_string(),
-                    details: "signature and public_key must both be present or both absent"
-                        .to_string(),
-                };
-                if push_or_halt(&mut result, err, opts.fail_fast) {
-                    break 'outer;
-                }
-            }
+        } else if entry.signature.is_some() || entry.public_key.is_some() {
+            // A reduced policy (chain-only or sampling) skipped this
+            // record's signature math. Count it so finish() can be honest
+            // about how much coverage was actually achieved.
+            self.result.signatures_skipped += 1;
         }
 
         if let Some(alg) = entry.hash_alg.as_deref() {
             if alg != "blake3" {
-                result.warnings.push(format!(
+                self.result.warnings.push(format!(
                     "sequence {}: hash_alg = {alg:?} but lenient verifier assumes blake3; \
                      payload integrity is unchecked",
                     entry.sequence
@@ -392,12 +520,12 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
         }
 
         if entry.receipt.is_some() {
-            receipts_seen += 1;
+            self.receipts_seen += 1;
         }
 
-        if let Some(ks) = opts.keystore {
+        if let Some(ks) = self.opts.keystore {
             match verify_receipt_signature(&entry, ks) {
-                Ok(true) => result.receipts_verified += 1,
+                Ok(true) => self.result.receipts_verified += 1,
                 Ok(false) => {}
                 Err(err) => {
                     let (etype, details) = match &err {
@@ -429,8 +557,8 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
                         error_type: etype.to_string(),
                         details,
                     };
-                    if push_or_halt(&mut result, v_err, opts.fail_fast) {
-                        break 'outer;
+                    if self.push(v_err) {
+                        return true;
                     }
                 }
             }
@@ -442,102 +570,133 @@ fn verify_internal(bytes: &[u8], opts: &LenientOptions) -> VerificationResult {
                 error_type: "invalid_hash_format".to_string(),
                 details: msg,
             };
-            if push_or_halt(&mut result, err, opts.fail_fast) {
-                break 'outer;
+            if self.push(err) {
+                return true;
             }
         }
 
-        advance_chain(
-            &mut result,
-            &mut prev_entry,
-            &mut prev_sequence,
-            &mut prev_timestamp,
-            &mut running_hash,
-            entry,
-        );
-    }
-
-    result.chain_root = hex::encode(running_hash.finalize().as_bytes());
-
-    if result.events_verified == 0 {
-        result.warnings.push("No WAL records found".to_string());
-    }
-
-    // Always check expected_root, even when no records were processed.
-    // An attacker who empties the segment directory must not be able
-    // to claim "valid: true" by virtue of producing zero records that
-    // also produce zero failures.
-    //
-    // A root that normalizes to empty (whitespace-only, or a bare `0x`) is
-    // treated as "no anchor supplied", matching the wasm facade so the same
-    // operator input is verified identically on the CLI and in the browser.
-    let normalized_root = opts
-        .expected_root
-        .map(crate::normalize_hex_anchor)
-        .filter(|s| !s.is_empty());
-    if let Some(normalized) = normalized_root {
-        if result.chain_root != normalized {
-            let computed = result.chain_root.clone();
-            let err = VerificationError {
-                sequence: None,
-                error_type: "root_mismatch".to_string(),
-                details: format!("expected {normalized}, computed {computed}"),
-            };
-            push_or_halt(&mut result, err, false);
-        }
-    } else if result.events_verified > 0 {
-        result.warnings.push(
-            "No expected root provided: verified internal consistency only. \
-             For full tamper-detection, compare chain_root against an external anchor."
-                .to_string(),
-        );
-    }
-
-    if opts.trusted_pubkey.is_none() && signatures_unpinned > 0 {
-        result.warnings.push(format!(
-            "{signatures_unpinned} signatures were verified against record-declared pubkeys (no external pin). \
-             Pass --trusted-pubkey on the CLI to require an externally pinned key, \
-             or use the strict verifier (spine_core::verify_demo_wal)."
-        ));
-    }
-
-    if opts.keystore.is_none() && receipts_seen > 0 {
-        result.warnings.push(format!(
-            "{receipts_seen} records carry server receipts but no keystore was supplied. \
-             Pass --keystore on the CLI to verify receipt signatures."
-        ));
-    }
-
-    result
-}
-
-fn advance_chain(
-    result: &mut VerificationResult,
-    prev_entry: &mut Option<WalEntry>,
-    prev_sequence: &mut Option<u64>,
-    prev_timestamp: &mut Option<i64>,
-    running_hash: &mut Hasher,
-    entry: WalEntry,
-) {
-    let entry_hash = compute_entry_hash(&entry);
-    running_hash.update(entry_hash.as_bytes());
-    *prev_sequence = Some(entry.sequence);
-    *prev_timestamp = Some(entry.timestamp_ns);
-    *prev_entry = Some(entry);
-    result.events_verified += 1;
-}
-
-/// Push `err` into the result and return `true` when the caller
-/// should break out of the per-record loop (fail-fast). Always sets
-/// `result.valid = false`.
-fn push_or_halt(result: &mut VerificationResult, err: VerificationError, fail_fast: bool) -> bool {
-    result.valid = false;
-    result.errors.push(err);
-    if fail_fast {
-        result.halted_early = true;
-        true
-    } else {
+        self.advance_chain(entry);
         false
+    }
+
+    /// Finish verification and produce the report: compute the final
+    /// `chain_root`, run the `expected_root` gate, and append the
+    /// summary warnings (policy coverage, unpinned signatures, receipts
+    /// without a keystore). Consumes the verifier.
+    pub fn finish(mut self) -> VerificationResult {
+        self.result.chain_root = hex::encode(self.running_hash.finalize().as_bytes());
+
+        if self.result.events_verified == 0 {
+            self.result
+                .warnings
+                .push("No WAL records found".to_string());
+        }
+
+        // Always check expected_root, even when no records were processed.
+        // An attacker who empties the segment directory must not be able
+        // to claim "valid: true" by virtue of producing zero records that
+        // also produce zero failures.
+        //
+        // A root that normalizes to empty (whitespace-only, or a bare `0x`)
+        // is treated as "no anchor supplied", matching the wasm facade so
+        // the same operator input is verified identically on the CLI and in
+        // the browser.
+        let normalized_root = self
+            .opts
+            .expected_root
+            .map(crate::normalize_hex_anchor)
+            .filter(|s| !s.is_empty());
+        if let Some(normalized) = normalized_root {
+            if self.result.chain_root != normalized {
+                let computed = self.result.chain_root.clone();
+                let err = VerificationError {
+                    sequence: None,
+                    error_type: "root_mismatch".to_string(),
+                    details: format!("expected {normalized}, computed {computed}"),
+                };
+                // Root mismatch always accumulates (never honors fail_fast):
+                // it is the single most important verdict and must surface
+                // even on a fail-fast run that already halted earlier.
+                self.result.valid = false;
+                self.result.errors.push(err);
+            }
+        } else if self.result.events_verified > 0 {
+            self.result.warnings.push(
+                "No expected root provided: verified internal consistency only. \
+                 For full tamper-detection, compare chain_root against an external anchor."
+                    .to_string(),
+            );
+        }
+
+        // Be explicit about reduced signature coverage so a green run
+        // under a reduced policy can never be mistaken for a full
+        // signature verification.
+        match self.policy {
+            SignaturePolicy::All => {}
+            SignaturePolicy::None => {
+                if self.result.events_verified > 0 {
+                    self.result.warnings.push(
+                        "Signatures were NOT verified (chain-only policy). Chain linkage, \
+                         sequence, timestamps and root were checked; per-record signatures were \
+                         not. Provide an authenticated expected_root for tamper-evidence, or run \
+                         full verification to check every signature."
+                            .to_string(),
+                    );
+                }
+            }
+            SignaturePolicy::Sample { one_in } => {
+                self.result.warnings.push(format!(
+                    "Sampled signature verification (1-in-{one_in}): {} signatures checked, {} \
+                     signed records left unchecked. Sampling is a routine spot-check for \
+                     accidental corruption, NOT a defense against a targeted forger who can avoid \
+                     the sampled positions. Use full verification or cryptographic inclusion \
+                     proofs for adversarial completeness.",
+                    self.result.signatures_verified, self.result.signatures_skipped
+                ));
+            }
+        }
+
+        if self.opts.trusted_pubkey.is_none() && self.signatures_unpinned > 0 {
+            self.result.warnings.push(format!(
+                "{} signatures were verified against record-declared pubkeys (no external pin). \
+                 Pass --trusted-pubkey on the CLI to require an externally pinned key, \
+                 or use the strict verifier (spine_core::verify_demo_wal).",
+                self.signatures_unpinned
+            ));
+        }
+
+        if self.opts.keystore.is_none() && self.receipts_seen > 0 {
+            self.result.warnings.push(format!(
+                "{} records carry server receipts but no keystore was supplied. \
+                 Pass --keystore on the CLI to verify receipt signatures.",
+                self.receipts_seen
+            ));
+        }
+
+        self.result
+    }
+
+    /// Push `err` into the result and return `true` when the caller
+    /// should stop feeding lines (fail-fast). Always sets
+    /// `result.valid = false`.
+    fn push(&mut self, err: VerificationError) -> bool {
+        self.result.valid = false;
+        self.result.errors.push(err);
+        if self.opts.fail_fast {
+            self.result.halted_early = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn advance_chain(&mut self, entry: WalEntry) {
+        let entry_hash = compute_entry_hash(&entry);
+        self.running_hash.update(entry_hash.as_bytes());
+        self.prev_sequence = Some(entry.sequence);
+        self.prev_timestamp = Some(entry.timestamp_ns);
+        self.prev_entry = Some(entry);
+        self.result.events_verified += 1;
     }
 }
 
@@ -1005,5 +1164,146 @@ mod tests {
         let r = verify_wal_bytes(&bytes);
         // Lenient does not fail receipts without a keystore, but warns.
         assert!(r.warnings.iter().any(|w| w.contains("receipts")));
+    }
+
+    /// Drive the streaming `LenientVerifier` one line at a time, the way
+    /// the CLI feeds it from disk.
+    fn run_streaming(
+        bytes: &[u8],
+        opts: &LenientOptions,
+        policy: SignaturePolicy,
+    ) -> VerificationResult {
+        let mut v = LenientVerifier::new(opts, policy);
+        for line in bytes.split(|&b| b == b'\n') {
+            if v.process_line(line) {
+                break;
+            }
+        }
+        v.finish()
+    }
+
+    /// Build a correctly-chained, fully-signed WAL. The signature covers
+    /// `prev_hash`, so `prev_hash` is set BEFORE signing and the full
+    /// entry hash (which folds in the signature) is taken AFTER, to link
+    /// the next record. This mirrors the production signing order.
+    fn build_signed_chain(n: u64, key: &SigningKey) -> Vec<WalEntry> {
+        let pk_hex = hex::encode(key.verifying_key().to_bytes());
+        let mut entries = Vec::new();
+        let mut prev = GENESIS_PREV_HASH.to_string();
+        for i in 1..=n {
+            let mut e = make_entry(i, 1000 * i as i64, &prev, &format!("payload{i}"));
+            let msg = compute_entry_hash_for_signing(&e);
+            e.signature = Some(hex::encode(key.sign(msg.as_bytes()).to_bytes()));
+            e.public_key = Some(pk_hex.clone());
+            prev = compute_entry_hash(&e);
+            entries.push(e);
+        }
+        entries
+    }
+
+    #[test]
+    fn streaming_matches_buffered_on_signed_chain() {
+        // The streaming verifier and the buffered byte API share one
+        // state machine; feeding line by line must yield an identical
+        // verdict, root and counters.
+        let signing_key = SigningKey::from_bytes(&[0x21; 32]);
+        let entries = build_signed_chain(4, &signing_key);
+        let bytes = to_jsonl(&entries);
+
+        let buffered = verify_wal_bytes(&bytes);
+        let streamed = run_streaming(&bytes, &LenientOptions::default(), SignaturePolicy::All);
+
+        assert_eq!(buffered.valid, streamed.valid);
+        assert_eq!(buffered.events_verified, streamed.events_verified);
+        assert_eq!(buffered.signatures_verified, streamed.signatures_verified);
+        assert_eq!(buffered.signatures_skipped, streamed.signatures_skipped);
+        assert_eq!(buffered.chain_root, streamed.chain_root);
+        assert_eq!(buffered.errors.len(), streamed.errors.len());
+        assert!(streamed.valid, "errors: {:?}", streamed.errors);
+        assert_eq!(streamed.signatures_verified, 4);
+        assert_eq!(streamed.signatures_skipped, 0);
+    }
+
+    #[test]
+    fn chain_only_skips_signatures_but_still_checks_the_chain() {
+        let signing_key = SigningKey::from_bytes(&[0x22; 32]);
+        let entries = build_signed_chain(3, &signing_key);
+        let bytes = to_jsonl(&entries);
+
+        let r = run_streaming(&bytes, &LenientOptions::default(), SignaturePolicy::None);
+        assert!(
+            r.valid,
+            "chain-only over a valid chain passes: {:?}",
+            r.errors
+        );
+        assert_eq!(
+            r.signatures_verified, 0,
+            "chain-only verifies no signatures"
+        );
+        assert_eq!(r.signatures_skipped, 3, "all 3 signed records were skipped");
+        assert!(r
+            .warnings
+            .iter()
+            .any(|w| w.contains("chain-only") || w.contains("NOT verified")));
+
+        // Chain integrity is still enforced: break a link and chain-only
+        // must catch it even though signatures are off.
+        let mut tampered = entries.clone();
+        tampered[1].prev_hash = "f".repeat(64);
+        let bytes2 = to_jsonl(&tampered);
+        let r2 = run_streaming(&bytes2, &LenientOptions::default(), SignaturePolicy::None);
+        assert!(!r2.valid);
+        assert!(r2.errors.iter().any(|e| e.error_type == "chain_break"));
+    }
+
+    #[test]
+    fn sample_signatures_verifies_only_the_sampled_subset() {
+        let signing_key = SigningKey::from_bytes(&[0x23; 32]);
+        let entries = build_signed_chain(6, &signing_key);
+        let bytes = to_jsonl(&entries);
+
+        let r = run_streaming(
+            &bytes,
+            &LenientOptions::default(),
+            SignaturePolicy::Sample { one_in: 3 },
+        );
+        assert!(r.valid, "errors: {:?}", r.errors);
+        // sequences 3 and 6 are multiples of 3.
+        assert_eq!(r.signatures_verified, 2);
+        assert_eq!(r.signatures_skipped, 4);
+        assert!(r.warnings.iter().any(|w| w.contains("1-in-3")));
+    }
+
+    #[test]
+    fn sample_does_not_check_an_unsampled_tampered_signature() {
+        // Tamper the LAST record's signature (no successor, so no chain
+        // break). Under full verification it is an invalid_signature;
+        // under sampling that skips it, the run stays valid. This is the
+        // honest, documented cost of sampling: partial coverage.
+        let signing_key = SigningKey::from_bytes(&[0x24; 32]);
+        let mut entries = build_signed_chain(3, &signing_key);
+        // Corrupt seq 3's signature to a valid-length but wrong value.
+        entries[2].signature = Some("0".repeat(128));
+        let bytes = to_jsonl(&entries);
+
+        let full = run_streaming(&bytes, &LenientOptions::default(), SignaturePolicy::All);
+        assert!(!full.valid, "full verification catches the bad signature");
+        assert!(full
+            .errors
+            .iter()
+            .any(|e| e.error_type == "invalid_signature"));
+
+        // one_in = 2 samples seq 2 only; seq 3 is never checked.
+        let sampled = run_streaming(
+            &bytes,
+            &LenientOptions::default(),
+            SignaturePolicy::Sample { one_in: 2 },
+        );
+        assert!(
+            sampled.valid,
+            "sampling skips seq 3's signature: {:?}",
+            sampled.errors
+        );
+        assert_eq!(sampled.signatures_verified, 1);
     }
 }
