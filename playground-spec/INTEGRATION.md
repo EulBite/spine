@@ -220,6 +220,27 @@ locations**:
 Three publication points means a CDN compromise is detectable by
 anyone who cross-checks.
 
+#### Pinning the signing key outside the manifest
+
+The manifest carries `expected_public_key` and `expected_chain_root`,
+but on its own that is circular: the browser fetches the manifest from
+the same origin as everything else, so a swapped manifest would also
+carry the key that "verifies" it. To break the loop, the component pins
+the expected public key as the `PINNED_PUBLIC_KEY` constant in
+[`DemoSection.example.jsx`](DemoSection.example.jsx) and refuses any
+manifest whose `expected_public_key` disagrees with it.
+
+This does not remove trust in the origin that serves the JS itself (a
+browser verifier always trusts wherever its own code comes from). What
+it changes is where the anchor lives: the key now travels with the
+reviewed, published source rather than with the data it authenticates,
+and it composes with the multi-location publication above, since a
+reader can diff the constant against the published manifests.
+
+When the demo signing key rotates, update `PINNED_PUBLIC_KEY` in the
+same commit that regenerates and republishes the manifest, so the
+constant and the manifest never drift apart.
+
 ### 7. CSP, SRI, immutable cache (host page concerns)
 
 The page that mounts the playground needs:

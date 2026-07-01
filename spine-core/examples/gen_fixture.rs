@@ -94,6 +94,9 @@ struct SignatureCase {
 
 #[derive(Serialize, Clone)]
 struct WalEntryFixture {
+    // Pinned per case: the entry hash framing depends on it, so a
+    // reimplementation must read it and pick the matching encoding.
+    format_version: u32,
     sequence: u64,
     timestamp_ns: i64,
     prev_hash: String,
@@ -107,6 +110,7 @@ struct WalEntryFixture {
 impl From<&WalEntry> for WalEntryFixture {
     fn from(e: &WalEntry) -> Self {
         Self {
+            format_version: e.format_version,
             sequence: e.sequence,
             timestamp_ns: e.timestamp_ns,
             prev_hash: e.prev_hash.clone(),
@@ -173,9 +177,9 @@ fn canonical_cases() -> Vec<CanonicalCase> {
         .collect()
 }
 
-fn entry_hash_cases() -> Vec<EntryHashCase> {
-    let base = WalEntry {
-        format_version: 1,
+fn entry_hash_base(version: u32) -> WalEntry {
+    WalEntry {
+        format_version: version,
         sequence: 1,
         timestamp_ns: 1_700_000_000_000_000_000,
         prev_hash: GENESIS_PREV_HASH.to_string(),
@@ -190,12 +194,20 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
         hash_alg: None,
         payload: None,
         receipt: None,
-    };
+    }
+}
 
+// The same shapes are pinned under both framings so a reimplementation
+// proves it reads `format_version` and selects the matching encoding,
+// not just the latest one. Version 1 is retained because already-emitted
+// WAL files (and the published demo) are version 1.
+fn entry_hash_cases_for_version(version: u32) -> Vec<EntryHashCase> {
+    let base = entry_hash_base(version);
+    let suffix = format!("_v{version}");
     let mut cases: Vec<EntryHashCase> = Vec::new();
 
     cases.push(EntryHashCase {
-        name: "genesis_all_optional_none".to_string(),
+        name: format!("genesis_all_optional_none{suffix}"),
         input: WalEntryFixture::from(&base),
         expected_entry_hash: compute_entry_hash(&base),
     });
@@ -203,7 +215,7 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
     let mut with_empty_event_type = base.clone();
     with_empty_event_type.event_type = Some(String::new());
     cases.push(EntryHashCase {
-        name: "event_type_some_empty_distinct_from_none".to_string(),
+        name: format!("event_type_some_empty_distinct_from_none{suffix}"),
         input: WalEntryFixture::from(&with_empty_event_type),
         expected_entry_hash: compute_entry_hash(&with_empty_event_type),
     });
@@ -211,7 +223,7 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
     let mut with_event_type = base.clone();
     with_event_type.event_type = Some("user.login".to_string());
     cases.push(EntryHashCase {
-        name: "event_type_some_value".to_string(),
+        name: format!("event_type_some_value{suffix}"),
         input: WalEntryFixture::from(&with_event_type),
         expected_entry_hash: compute_entry_hash(&with_event_type),
     });
@@ -219,7 +231,7 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
     let mut with_source = base.clone();
     with_source.source = Some("auth-service".to_string());
     cases.push(EntryHashCase {
-        name: "source_some_value".to_string(),
+        name: format!("source_some_value{suffix}"),
         input: WalEntryFixture::from(&with_source),
         expected_entry_hash: compute_entry_hash(&with_source),
     });
@@ -228,7 +240,7 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
     with_sig.signature = Some("a".repeat(128));
     with_sig.public_key = Some("b".repeat(64));
     cases.push(EntryHashCase {
-        name: "signed_record_all_four_optional_set".to_string(),
+        name: format!("signed_record_all_four_optional_set{suffix}"),
         input: WalEntryFixture::from(&with_sig),
         expected_entry_hash: compute_entry_hash(&with_sig),
     });
@@ -239,7 +251,7 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
     subsequent.prev_hash = compute_entry_hash(&base);
     subsequent.payload_hash = "cd".repeat(32);
     cases.push(EntryHashCase {
-        name: "subsequent_chain_link".to_string(),
+        name: format!("subsequent_chain_link{suffix}"),
         input: WalEntryFixture::from(&subsequent),
         expected_entry_hash: compute_entry_hash(&subsequent),
     });
@@ -247,9 +259,39 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
     cases
 }
 
+fn entry_hash_cases() -> Vec<EntryHashCase> {
+    let mut cases = entry_hash_cases_for_version(1);
+    cases.extend(entry_hash_cases_for_version(2));
+
+    // Injectivity witness. These two entries split the same bytes
+    // across event_type/source differently. Under version-1 framing
+    // they collide; under version-2 their length prefixes keep them
+    // apart. A reimplementation that emits identical hashes for the two
+    // version-2 cases has not implemented the length prefix.
+    let mut collide_left = entry_hash_base(2);
+    collide_left.event_type = Some("a".to_string());
+    collide_left.source = Some("b\u{1}c".to_string());
+    cases.push(EntryHashCase {
+        name: "injectivity_witness_left_v2".to_string(),
+        input: WalEntryFixture::from(&collide_left),
+        expected_entry_hash: compute_entry_hash(&collide_left),
+    });
+
+    let mut collide_right = entry_hash_base(2);
+    collide_right.event_type = Some("a\u{1}b".to_string());
+    collide_right.source = Some("c".to_string());
+    cases.push(EntryHashCase {
+        name: "injectivity_witness_right_v2".to_string(),
+        input: WalEntryFixture::from(&collide_right),
+        expected_entry_hash: compute_entry_hash(&collide_right),
+    });
+
+    cases
+}
+
 fn sign_hash_cases() -> Vec<SignHashCase> {
     let mut entry = WalEntry {
-        format_version: 1,
+        format_version: WAL_FORMAT_VERSION,
         sequence: 1,
         timestamp_ns: 1_700_000_000_000_000_000,
         prev_hash: GENESIS_PREV_HASH.to_string(),
@@ -288,7 +330,7 @@ fn chain_root_cases() -> Vec<ChainRootCase> {
     let mut prev = GENESIS_PREV_HASH.to_string();
     for i in 1..=3u64 {
         let e = WalEntry {
-            format_version: 1,
+            format_version: WAL_FORMAT_VERSION,
             sequence: i,
             timestamp_ns: 1_700_000_000_000_000_000 + (i as i64) * 1_000_000_000,
             prev_hash: prev.clone(),
@@ -380,7 +422,7 @@ fn signature_cases() -> Vec<SignatureCase> {
     let pk_hex = hex::encode(sk.verifying_key().to_bytes());
 
     let entry = WalEntry {
-        format_version: 1,
+        format_version: WAL_FORMAT_VERSION,
         sequence: 1,
         timestamp_ns: 1_700_000_000_000_000_000,
         prev_hash: GENESIS_PREV_HASH.to_string(),

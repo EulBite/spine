@@ -55,8 +55,9 @@ pub use verify_demo::{
 pub use wal_entry::{
     compute_chain_root, compute_chain_root_from_entries, compute_entry_hash,
     compute_entry_hash_for_signing, compute_entry_hash_for_signing_raw, compute_entry_hash_raw,
-    validate_entry_hashes, validate_hex_hash, verify_chain_link, HashVerification, HexValidation,
-    WalEntry, GENESIS_PREV_HASH, WAL_FORMAT_VERSION,
+    is_supported_format_version, validate_entry_hashes, validate_hex_hash, verify_chain_link,
+    HashVerification, HexValidation, WalEntry, GENESIS_PREV_HASH, SUPPORTED_WAL_FORMAT_VERSIONS,
+    WAL_FORMAT_VERSION,
 };
 
 /// Crate version, surfaced in [`DemoReport::verifier_version`] so a

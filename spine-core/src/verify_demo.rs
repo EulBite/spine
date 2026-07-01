@@ -41,9 +41,11 @@
 //! Beyond the strict-vs-lenient axis above, the strict verifier
 //! enforces three invariants that the lenient path silently tolerates:
 //!
-//! * `format_version` must equal [`WAL_FORMAT_VERSION`]. A future
-//!   bump requires re-publishing the manifest with a new
-//!   `manifest_version`.
+//! * `format_version` must be one of
+//!   [`SUPPORTED_WAL_FORMAT_VERSIONS`], and the field must be present
+//!   (strict refuses a record that omits it). The entry hash is then
+//!   computed with the framing of that version. Adding a new version
+//!   requires re-publishing the manifest with a new `manifest_version`.
 //! * `hash_alg`, when present, must equal `"blake3"`.
 //! * `timestamp_ns` must be monotonically non-decreasing across
 //!   records.
@@ -65,8 +67,8 @@ use subtle::ConstantTimeEq;
 
 use crate::canonical::canonical_json;
 use crate::wal_entry::{
-    compute_entry_hash, compute_entry_hash_for_signing, validate_entry_hashes, WalEntry,
-    GENESIS_PREV_HASH, WAL_FORMAT_VERSION,
+    compute_entry_hash, compute_entry_hash_for_signing, is_supported_format_version,
+    validate_entry_hashes, WalEntry, GENESIS_PREV_HASH,
 };
 use crate::VERIFIER_VERSION;
 
@@ -468,7 +470,12 @@ fn strict_check_record(
     if !format_version_declared {
         return RecordResult::Rejected(RejectedReason::UnsupportedFormatVersion { found: 0 });
     }
-    if entry.format_version != WAL_FORMAT_VERSION {
+    // Accept any version this build knows how to hash, not only the
+    // latest. The entry hash dispatches on `format_version`, so a
+    // version-1 WAL still verifies against its own framing after the
+    // emit version moves to 2. Rejecting here would break every WAL
+    // file written before the bump, including the published demo.
+    if !is_supported_format_version(entry.format_version) {
         return RecordResult::Rejected(RejectedReason::UnsupportedFormatVersion {
             found: entry.format_version,
         });
@@ -681,7 +688,7 @@ fn constant_time_hex_eq(a: &str, b: &str) -> bool {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::wal_entry::compute_entry_hash;
+    use crate::wal_entry::{compute_entry_hash, WAL_FORMAT_VERSION};
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
 
@@ -697,7 +704,7 @@ mod tests {
         let canonical = canonical_json(&payload).unwrap();
         let payload_hash = hex::encode(blake3::hash(&canonical).as_bytes());
         WalEntry {
-            format_version: 1,
+            format_version: WAL_FORMAT_VERSION,
             sequence: seq,
             timestamp_ns: ts,
             prev_hash: prev.to_string(),

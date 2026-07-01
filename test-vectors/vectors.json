@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "wal_format_version": 1,
+  "wal_format_version": 2,
   "canonical_json": {
     "cases": [
       {
@@ -106,8 +106,9 @@
   "entry_hash": {
     "cases": [
       {
-        "name": "genesis_all_optional_none",
+        "name": "genesis_all_optional_none_v1",
         "input": {
+          "format_version": 1,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -120,8 +121,9 @@
         "expected_entry_hash": "5be52ea29daebf24a9807048a6df5c26ccbb8885d7b545c15ba13406e25167f0"
       },
       {
-        "name": "event_type_some_empty_distinct_from_none",
+        "name": "event_type_some_empty_distinct_from_none_v1",
         "input": {
+          "format_version": 1,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -134,8 +136,9 @@
         "expected_entry_hash": "5a85bb7b353993888b968582a61e628154481fb550895a7d1404e1669610403a"
       },
       {
-        "name": "event_type_some_value",
+        "name": "event_type_some_value_v1",
         "input": {
+          "format_version": 1,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -148,8 +151,9 @@
         "expected_entry_hash": "28def972265ee049614b24d224584607460887972fc53e4ff210ce058fa613b1"
       },
       {
-        "name": "source_some_value",
+        "name": "source_some_value_v1",
         "input": {
+          "format_version": 1,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -162,8 +166,9 @@
         "expected_entry_hash": "e280d5d772b32f8d9daaaf0f659da9effb8c07488e0c1df95f9b149ea0b30917"
       },
       {
-        "name": "signed_record_all_four_optional_set",
+        "name": "signed_record_all_four_optional_set_v1",
         "input": {
+          "format_version": 1,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -176,8 +181,9 @@
         "expected_entry_hash": "6430d1b56a6f3cadf827caac021c7b2dbb2e6b69ffa1de253daf34f728ced68e"
       },
       {
-        "name": "subsequent_chain_link",
+        "name": "subsequent_chain_link_v1",
         "input": {
+          "format_version": 1,
           "sequence": 2,
           "timestamp_ns": 1700000001000000000,
           "prev_hash": "5be52ea29daebf24a9807048a6df5c26ccbb8885d7b545c15ba13406e25167f0",
@@ -188,6 +194,126 @@
           "public_key": null
         },
         "expected_entry_hash": "29bc0aec5f493c153b50084c4354c3c206065daa86b969e8967caaf84cb9da87"
+      },
+      {
+        "name": "genesis_all_optional_none_v2",
+        "input": {
+          "format_version": 2,
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": null,
+          "source": null,
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "5be52ea29daebf24a9807048a6df5c26ccbb8885d7b545c15ba13406e25167f0"
+      },
+      {
+        "name": "event_type_some_empty_distinct_from_none_v2",
+        "input": {
+          "format_version": 2,
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "",
+          "source": null,
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "4b140ccdaeb505b92ebd476a117062ded23a6840471588efbd18792fccf3bc37"
+      },
+      {
+        "name": "event_type_some_value_v2",
+        "input": {
+          "format_version": 2,
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "user.login",
+          "source": null,
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "7a8c05f50eb91dd2efc16097edab85eaaa3a8604f54ac77c92cfd58346ca393c"
+      },
+      {
+        "name": "source_some_value_v2",
+        "input": {
+          "format_version": 2,
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": null,
+          "source": "auth-service",
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "6394f65dd3670c0cff3dd95b0345294e180f160850a83a69a8d0c41f79b09d8d"
+      },
+      {
+        "name": "signed_record_all_four_optional_set_v2",
+        "input": {
+          "format_version": 2,
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": null,
+          "source": null,
+          "signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "public_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "expected_entry_hash": "3f443d720002b60f35d9a1695d9267702e7a8f131f8666180c0d86e889eec1a2"
+      },
+      {
+        "name": "subsequent_chain_link_v2",
+        "input": {
+          "format_version": 2,
+          "sequence": 2,
+          "timestamp_ns": 1700000001000000000,
+          "prev_hash": "5be52ea29daebf24a9807048a6df5c26ccbb8885d7b545c15ba13406e25167f0",
+          "payload_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+          "event_type": null,
+          "source": null,
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "29bc0aec5f493c153b50084c4354c3c206065daa86b969e8967caaf84cb9da87"
+      },
+      {
+        "name": "injectivity_witness_left_v2",
+        "input": {
+          "format_version": 2,
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "a",
+          "source": "b\u0001c",
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "7bb05fe256c4ee0cf65c5af9ae5e419766a09bc3699e4c1ae4d9170ba7b36ab2"
+      },
+      {
+        "name": "injectivity_witness_right_v2",
+        "input": {
+          "format_version": 2,
+          "sequence": 1,
+          "timestamp_ns": 1700000000000000000,
+          "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "payload_hash": "abababababababababababababababababababababababababababababababab",
+          "event_type": "a\u0001b",
+          "source": "c",
+          "signature": null,
+          "public_key": null
+        },
+        "expected_entry_hash": "0fcacae1b245765b459d8a6ea938b72ed6e336b1ea5200ce04ca0dd537397269"
       }
     ]
   },
@@ -196,6 +322,7 @@
       {
         "name": "unsigned_entry_matches_chain_hash",
         "input": {
+          "format_version": 2,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -205,11 +332,12 @@
           "signature": null,
           "public_key": null
         },
-        "expected_sign_hash": "0ad2015edb01f6f3aa87c222e66cbe1d259e47b11d487d70177bb149bfcc67d9"
+        "expected_sign_hash": "4ff596473f2aebe00e9f3d9e2090bb39daf47f640c87041711476ede80349988"
       },
       {
         "name": "signed_entry_invariant_under_sig_and_pubkey",
         "input": {
+          "format_version": 2,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -219,7 +347,7 @@
           "signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "public_key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
-        "expected_sign_hash": "0ad2015edb01f6f3aa87c222e66cbe1d259e47b11d487d70177bb149bfcc67d9"
+        "expected_sign_hash": "4ff596473f2aebe00e9f3d9e2090bb39daf47f640c87041711476ede80349988"
       }
     ]
   },
@@ -229,6 +357,7 @@
         "name": "three_entry_unsigned_chain",
         "inputs": [
           {
+            "format_version": 2,
             "sequence": 1,
             "timestamp_ns": 1700000001000000000,
             "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -239,6 +368,7 @@
             "public_key": null
           },
           {
+            "format_version": 2,
             "sequence": 2,
             "timestamp_ns": 1700000002000000000,
             "prev_hash": "d6cb0c6b5b95b55c2b7d22627ce2e1afecdd57bf8d14a6d073c37628287fba3f",
@@ -249,6 +379,7 @@
             "public_key": null
           },
           {
+            "format_version": 2,
             "sequence": 3,
             "timestamp_ns": 1700000003000000000,
             "prev_hash": "9a9fedb03250e50435f2399277917990caeb1d4ffbd0a9586f08c7b9ef3169c5",
@@ -308,6 +439,7 @@
         "name": "lenient_no_domain_prefix",
         "profile": "lenient",
         "input": {
+          "format_version": 2,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -319,13 +451,14 @@
         },
         "signing_key_seed_hex": "4242424242424242424242424242424242424242424242424242424242424242",
         "public_key_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
-        "signed_message_hex": "30616432303135656462303166366633616138376332323265363663626531643235396534376231316434383764373031373762623134396266636336376439",
-        "signature_hex": "77ab8d765df147a99b8ac99e05715e2590af434b02ebcc6c1d1bc51474d0155207917d4e6a02491594e6a8fd6bd1f613d27dbd44ad474915c72240e868f2ea01"
+        "signed_message_hex": "34666635393634373366326165626530306539663364396532303930626233396461663437663634306338373034313731313437366564653830333439393838",
+        "signature_hex": "84c8413ee1dfbde69daf145d3e32f0b7ffe5c4f277b6b73d12044d501a96831bb70c76a11794a13a953f47805261806754e4764984744001572f941dfc20d205"
       },
       {
         "name": "strict_with_spine_wal_v1_prefix",
         "profile": "strict",
         "input": {
+          "format_version": 2,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -337,8 +470,8 @@
         },
         "signing_key_seed_hex": "4242424242424242424242424242424242424242424242424242424242424242",
         "public_key_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
-        "signed_message_hex": "7370696e652d77616c2d76310030616432303135656462303166366633616138376332323265363663626531643235396534376231316434383764373031373762623134396266636336376439",
-        "signature_hex": "0b55bb479ca0c835b864b6426710f0ad69ede1bdadfe552887346f959678b157f33483a9fca5e5c4e22778e0c33343f4aee789e23284cc0e11cd0d7816bcc90d"
+        "signed_message_hex": "7370696e652d77616c2d76310034666635393634373366326165626530306539663364396532303930626233396461663437663634306338373034313731313437366564653830333439393838",
+        "signature_hex": "91d85f73e991035e33c499241cb6ae5a6c4649e0d5e8ccaeb65fdd1a427febc52885d54a69bcdff43077fcbc6a42ac9c2c2c3d7cfb86559e5db5b6471df4ab0a"
       }
     ]
   }

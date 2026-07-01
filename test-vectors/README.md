@@ -34,7 +34,7 @@ When a section below applies to only one profile, it is labelled.
 ```json
 {
   "schema_version": 1,
-  "wal_format_version": 1,
+  "wal_format_version": 2,
   "canonical_json": { "cases": [ ... ] },
   "entry_hash": { "cases": [ ... ] },
   "sign_hash": { "cases": [ ... ] },
@@ -43,6 +43,14 @@ When a section below applies to only one profile, it is labelled.
   "signature": { "cases": [ ... ] }
 }
 ```
+
+`wal_format_version` is the version new producers emit. Verifiers must
+still accept older versions: every WAL entry carries its own
+`format_version`, and the entry hash is computed with the framing of
+that version (see §3). The `entry_hash` section pins cases under both
+version 1 and version 2 (case names suffixed `_v1` / `_v2`) so a
+reimplementation proves it dispatches on the field rather than assuming
+the latest framing.
 
 Each section pins a primitive. A case is the smallest input that
 exercises a single rule of the contract. All hex strings are
@@ -105,22 +113,53 @@ entry_hash_raw = BLAKE3(
 )
 ```
 
-where the presence framing for an optional string field is
+where the framing for an optional string field depends on the entry's
+`format_version`:
 
 ```
-presence(None)         = b"\x00"
-presence(Some(s))      = b"\x01" || s.as_utf8_bytes()
+// version 1 (original; retained for already-emitted WAL files)
+presence_v1(None)      = b"\x00"
+presence_v1(Some(s))   = b"\x01" || s.as_utf8_bytes()
+
+// version 2 (current; length-prefixed)
+presence_v2(None)      = b"\x00"
+presence_v2(Some(s))   = b"\x01" || len(s).to_le_bytes(8) || s.as_utf8_bytes()
 ```
+
+`len(s)` is the UTF-8 byte length of `s` as a u64 little-endian, the
+same width as `seq` and `timestamp_ns`. Pick the framing that matches
+the entry's own `format_version`.
 
 `entry_hash_raw` is 32 raw bytes. The hex form (64 chars lowercase)
 is what gets stored as the next record's `prev_hash` field, and is
 the per-record input the `chain_root` accumulator hashes over (§7).
 It is not itself the `chain_root`.
 
-The presence byte distinguishes `None` from `Some("")` so a producer
-cannot flip the two without changing the digest. A regression that
-drops the framing silently loses that distinction and re-opens the
-chain-link forgery primitive the framing was introduced to close.
+In both versions the presence byte distinguishes `None` from `Some("")`
+so a producer cannot flip the two without changing the digest.
+
+Version 2 exists because version 1 was not injective. With
+`b"\x01" || value` and no length, the four optional fields ran
+together with nothing marking where one ended and the next began. A
+value containing a `\x01` byte could imitate the presence marker of
+the field after it, so two semantically different entries could hash
+to the same digest: `{event_type: "a", source: "bc"}` and
+`{event_type: "ab", source: "c"}` produced identical bytes.
+`event_type` and `source` carry arbitrary operator-supplied text, so
+this was reachable from real ingest. The version-2 length prefix is
+read before the value, so a `\x01` inside a value can no longer be
+mistaken for the start of the next field. The `entry_hash` section
+includes two version-2 witness cases (`injectivity_witness_left_v2`,
+`injectivity_witness_right_v2`) built from exactly this input; their
+pinned hashes differ, and a reimplementation that produces equal
+hashes for them has not implemented the length prefix.
+
+As defense in depth for the retained version-1 framing, verifiers also
+refuse ASCII control characters (the C0 range plus DEL) in `event_type`
+and `source`. Those fields are short identifiers (`user.login`,
+`auth-service`) where control characters carry no legitimate meaning,
+and refusing them closes the documented collision for version-1 entries
+too, not only version-2 ones.
 
 ## 4. Sign hash (shared)
 
@@ -139,6 +178,10 @@ sign_hash_raw = BLAKE3(
     b"\x00"                            // public_key forced to None
 )
 ```
+
+`presence` is the same version-aware framing as in §3 (the two forced
+`None` fields are a single `b"\x00"` in both versions, so only
+`event_type` and `source` differ between v1 and v2).
 
 Why a separate hash: a signer cannot include its own output in the
 bytes it is about to sign. Verifiers MUST use this hash (never the
