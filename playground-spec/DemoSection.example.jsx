@@ -44,8 +44,11 @@ const MANIFEST_URL = '/playground/manifest.json';
 // republishes the manifest.
 //
 // Set to null to fall back to the manifest-supplied key (development
-// only). In that mode the circular-trust gap above is open.
-const PINNED_PUBLIC_KEY = null;
+// only). In that mode the circular-trust gap above is open, so a real
+// deployment must pin the actual demo key here (as the value below
+// shows) rather than ship null.
+const PINNED_PUBLIC_KEY =
+  '39074fee39061183266879e928ba4f908c6048afc6fa71aedec66b8cb784632c';
 
 // Module-scoped handles populated by bootstrap() once the glue is
 // verified and the wasm module is initialised.

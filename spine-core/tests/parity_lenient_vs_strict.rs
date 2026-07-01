@@ -40,6 +40,7 @@ fn build_entry(seq: u64, ts: i64, prev: &str, payload: serde_json::Value) -> Wal
         source: None,
         signature: None,
         public_key: None,
+        severity: None,
         key_id: None,
         event_id: None,
         stream_id: None,

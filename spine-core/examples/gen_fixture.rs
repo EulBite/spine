@@ -105,6 +105,8 @@ struct WalEntryFixture {
     source: Option<String>,
     signature: Option<String>,
     public_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    severity: Option<String>,
 }
 
 impl From<&WalEntry> for WalEntryFixture {
@@ -119,6 +121,7 @@ impl From<&WalEntry> for WalEntryFixture {
             source: e.source.clone(),
             signature: e.signature.clone(),
             public_key: e.public_key.clone(),
+            severity: e.severity.clone(),
         }
     }
 }
@@ -188,6 +191,7 @@ fn entry_hash_base(version: u32) -> WalEntry {
         source: None,
         signature: None,
         public_key: None,
+        severity: None,
         key_id: None,
         event_id: None,
         stream_id: None,
@@ -286,6 +290,42 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
         expected_entry_hash: compute_entry_hash(&collide_right),
     });
 
+    // severity is hashed from version 2. These two witnesses differ only
+    // in severity: under version 2 their hashes must differ (severity is
+    // committed), while the version-1 pair below hashes the same (v1 does
+    // not cover severity, which is why v1 relies on other mitigations).
+    let mut sev_critical_v2 = entry_hash_base(2);
+    sev_critical_v2.severity = Some("critical".to_string());
+    cases.push(EntryHashCase {
+        name: "severity_critical_v2".to_string(),
+        input: WalEntryFixture::from(&sev_critical_v2),
+        expected_entry_hash: compute_entry_hash(&sev_critical_v2),
+    });
+
+    let mut sev_info_v2 = entry_hash_base(2);
+    sev_info_v2.severity = Some("info".to_string());
+    cases.push(EntryHashCase {
+        name: "severity_info_v2".to_string(),
+        input: WalEntryFixture::from(&sev_info_v2),
+        expected_entry_hash: compute_entry_hash(&sev_info_v2),
+    });
+
+    let mut sev_critical_v1 = entry_hash_base(1);
+    sev_critical_v1.severity = Some("critical".to_string());
+    cases.push(EntryHashCase {
+        name: "severity_critical_v1".to_string(),
+        input: WalEntryFixture::from(&sev_critical_v1),
+        expected_entry_hash: compute_entry_hash(&sev_critical_v1),
+    });
+
+    let mut sev_info_v1 = entry_hash_base(1);
+    sev_info_v1.severity = Some("info".to_string());
+    cases.push(EntryHashCase {
+        name: "severity_info_v1".to_string(),
+        input: WalEntryFixture::from(&sev_info_v1),
+        expected_entry_hash: compute_entry_hash(&sev_info_v1),
+    });
+
     cases
 }
 
@@ -300,6 +340,7 @@ fn sign_hash_cases() -> Vec<SignHashCase> {
         source: Some("auth-service".to_string()),
         signature: None,
         public_key: None,
+        severity: None,
         key_id: None,
         event_id: None,
         stream_id: None,
@@ -339,6 +380,7 @@ fn chain_root_cases() -> Vec<ChainRootCase> {
             source: None,
             signature: None,
             public_key: None,
+            severity: None,
             key_id: None,
             event_id: None,
             stream_id: None,
@@ -431,6 +473,7 @@ fn signature_cases() -> Vec<SignatureCase> {
         source: Some("auth-service".to_string()),
         signature: None,
         public_key: None,
+        severity: None,
         key_id: None,
         event_id: None,
         stream_id: None,

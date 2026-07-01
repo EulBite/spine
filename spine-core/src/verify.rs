@@ -761,6 +761,7 @@ mod tests {
             source: None,
             signature: None,
             public_key: None,
+            severity: None,
             key_id: None,
             event_id: None,
             stream_id: None,

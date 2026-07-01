@@ -147,19 +147,47 @@ pub enum InvalidReason {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RejectedReason {
-    ParseError { line: usize, details: String },
-    UnsupportedFormatVersion { found: u32 },
-    UnsupportedHashAlg { found: String },
+    ParseError {
+        line: usize,
+        details: String,
+    },
+    UnsupportedFormatVersion {
+        found: u32,
+    },
+    UnsupportedHashAlg {
+        found: String,
+    },
     UnsignedRecord,
     PubkeyMismatch,
-    SignatureMalformed { details: String },
-    PubkeyMalformed { details: String },
+    SignatureMalformed {
+        details: String,
+    },
+    PubkeyMalformed {
+        details: String,
+    },
     NoPayload,
-    PayloadTooLarge { bytes: usize, limit: usize },
-    LineTooLarge { bytes: usize, limit: usize },
-    NonCanonicalPayload { details: String },
-    TooManyRecords { limit: usize },
-    UnknownField { field: String },
+    PayloadTooLarge {
+        bytes: usize,
+        limit: usize,
+    },
+    LineTooLarge {
+        bytes: usize,
+        limit: usize,
+    },
+    NonCanonicalPayload {
+        details: String,
+    },
+    TooManyRecords {
+        limit: usize,
+    },
+    UnknownField {
+        field: String,
+    },
+    /// The record carries a server receipt, but the strict profile has
+    /// no keystore to check the receipt signature against. Accepting it
+    /// would present an unverified attestation as if it had passed, so
+    /// the strict profile refuses the record instead.
+    ReceiptUnverifiable,
 }
 
 /// Every JSON key the strict profile recognizes on a record: the canonical
@@ -193,6 +221,7 @@ const STRICT_ALLOWED_KEYS: &[&str] = &[
     "public_key",
     "pubkey",
     "pk",
+    "severity",
     "key_id",
     "event_id",
     "stream_id",
@@ -488,6 +517,17 @@ fn strict_check_record(
         }
     }
 
+    // A receipt is a separately-signed server attestation. Verifying it
+    // needs the server's receipt key, which the strict demo profile does
+    // not carry (the browser has no keystore). Rather than let an
+    // unverifiable receipt ride along on an otherwise-valid record, and
+    // so appear verified, the strict profile refuses any record that
+    // carries one. The lenient profile is where receipts are checked,
+    // and only when a keystore is supplied.
+    if entry.receipt.is_some() {
+        return RecordResult::Rejected(RejectedReason::ReceiptUnverifiable);
+    }
+
     let (sig_hex, pk_hex) = match (entry.signature.as_deref(), entry.public_key.as_deref()) {
         (Some(s), Some(p)) => (s, p),
         _ => return RecordResult::Rejected(RejectedReason::UnsignedRecord),
@@ -713,6 +753,7 @@ mod tests {
             source: None,
             signature: None,
             public_key: None,
+            severity: None,
             key_id: None,
             event_id: None,
             stream_id: None,
@@ -796,6 +837,45 @@ mod tests {
                 reason: RejectedReason::UnsignedRecord
             }
         ));
+    }
+
+    #[test]
+    fn record_carrying_a_receipt_is_rejected_by_strict() {
+        // The strict profile has no keystore, so it cannot verify a
+        // server receipt. It must refuse a record that carries one rather
+        // than accept it with the receipt unchecked, otherwise an
+        // unverified attestation would ride along on a "valid" record.
+        use crate::receipt::Receipt;
+        let (sk, pk_hex) = signer_keypair(0x30);
+        let (mut entries, root) = build_chain(1, &sk);
+        // Attaching a receipt does not change the entry hash (receipt is
+        // not hashed), so the chain root stays valid; the record must be
+        // rejected specifically for the unverifiable receipt.
+        entries[0].receipt = Some(Receipt {
+            event_id: "evt-1".to_string(),
+            payload_hash: entries[0].payload_hash.clone(),
+            server_time: "2026-07-01T00:00:00Z".to_string(),
+            server_seq: 1,
+            receipt_sig: "00".repeat(64),
+            server_key_id: "srv".to_string(),
+            sig_alg: "ed25519".to_string(),
+            batch_id: None,
+        });
+
+        let bytes = to_jsonl(&entries);
+        let report = verify_demo_wal(&bytes, &pk_hex, &root, 1);
+        assert_eq!(report.status, DemoStatus::Invalid);
+        let last = report.records.last().unwrap();
+        assert!(
+            matches!(
+                &last.outcome,
+                DemoRecordOutcome::Rejected {
+                    reason: RejectedReason::ReceiptUnverifiable
+                }
+            ),
+            "expected ReceiptUnverifiable, got {:?}",
+            last.outcome
+        );
     }
 
     #[test]

@@ -98,7 +98,7 @@ with this recompute.
 ## 3. Entry hash (shared)
 
 Both verifiers compute the chain-link hash identically. The
-contract pins eight fields in order:
+contract pins these fields in order:
 
 ```
 entry_hash_raw = BLAKE3(
@@ -109,9 +109,20 @@ entry_hash_raw = BLAKE3(
     presence(event_type)           ||
     presence(source)               ||
     presence(signature)            ||
-    presence(public_key)
+    presence(public_key)           ||
+    presence(severity)                 // version 2 only, omitted for version 1
 )
 ```
+
+`severity` is hashed only from format version 2 onward. A version-1
+preimage stops after `public_key`; a version-2 preimage appends
+`presence(severity)` as a ninth field. It is hashed because consumers
+(dashboards, alerting) read the severity label to decide what is
+critical, and if it were outside the hash an edit to a stored record
+could flip `critical` to `info` without breaking the chain. The
+`entry_hash` section includes `severity_critical_v2` / `severity_info_v2`
+(whose hashes must differ) and `severity_critical_v1` / `severity_info_v1`
+(whose hashes must match, since version 1 never covered the field).
 
 where the framing for an optional string field depends on the entry's
 `format_version`:
@@ -181,7 +192,10 @@ sign_hash_raw = BLAKE3(
 
 `presence` is the same version-aware framing as in §3 (the two forced
 `None` fields are a single `b"\x00"` in both versions, so only
-`event_type` and `source` differ between v1 and v2).
+`event_type` and `source` differ between v1 and v2). Under version 2
+the sign hash also appends `presence(severity)` after the two forced
+`None` fields, matching the chain hash: a signature has to commit to
+the same content the chain does.
 
 Why a separate hash: a signer cannot include its own output in the
 bytes it is about to sign. Verifiers MUST use this hash (never the

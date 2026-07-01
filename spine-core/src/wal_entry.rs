@@ -5,7 +5,7 @@
 //!
 //! ## Entry hash contract (chain link)
 //!
-//! [`compute_entry_hash`] covers eight fields in this exact order:
+//! [`compute_entry_hash`] covers these fields in this exact order:
 //!
 //! 1. `sequence`, 8 bytes little-endian u64
 //! 2. `timestamp_ns`, 8 bytes little-endian i64
@@ -15,6 +15,13 @@
 //! 6. `source`, same framing as `event_type`
 //! 7. `signature`, same framing as `event_type`
 //! 8. `public_key`, same framing as `event_type`
+//! 9. `severity`, same framing as `event_type`, hashed only from
+//!    format version 2 onward (version-1 records stop at field 8)
+//!
+//! Field 9 is version-gated: a version-1 preimage ends after
+//! `public_key`, a version-2 preimage appends `severity`. This keeps
+//! version-1 digests unchanged while making the severity label a
+//! consumer trusts tamper-evident under version 2.
 //!
 //! ## How an optional field is framed, and why it has two versions
 //!
@@ -82,7 +89,9 @@
 //!       with no length prefix (2026-05). Retained for already-emitted
 //!       WAL files; not collision-free, see above.
 //!   2 - Optional fields length-prefixed `0x01 || u64_LE(len) || value`,
-//!       which makes the entry hash injective (2026-06).
+//!       which makes the entry hash injective, AND `severity` added as a
+//!       ninth hashed field so a consumer-trusted label cannot be edited
+//!       without breaking the chain (2026-06).
 
 use blake3::Hasher;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -240,6 +249,7 @@ pub fn validate_entry_hashes(entry: &WalEntry) -> Vec<String> {
     for (name, value) in [
         ("event_type", entry.event_type.as_deref()),
         ("source", entry.source.as_deref()),
+        ("severity", entry.severity.as_deref()),
     ] {
         if let Some(v) = value {
             if let Some((pos, ch)) = first_control_char(v) {
@@ -402,6 +412,22 @@ pub struct WalEntry {
     #[serde(default, alias = "pubkey", alias = "pk")]
     pub public_key: Option<String>,
 
+    /// Optional severity label the producer attached to the event
+    /// (`critical`, `warning`, ...). Part of the chain hash from format
+    /// version 2 onward, framed like the other optional fields.
+    ///
+    /// Why it is hashed: a producer keeps `severity` as a fast-filter
+    /// copy alongside the event, and consumers (dashboards, alerting)
+    /// read it to decide what is critical. If it were outside the hash,
+    /// an edit to a stored record could flip an event from `critical` to
+    /// `info` without breaking the chain, so a consumer would show a
+    /// tampered criticality that still "verified". Binding it commits
+    /// the label the same way the chain commits everything else a
+    /// consumer trusts. Version-1 records did not hash it; they keep
+    /// their original framing (see the format-version dispatch below).
+    #[serde(default)]
+    pub severity: Option<String>,
+
     /// Short identifier for the signing key, SDK metadata only,
     /// NOT in the chain hash.
     #[serde(default)]
@@ -432,6 +458,12 @@ pub struct WalEntry {
     /// carry it; the receipt itself is signed separately via
     /// [`crate::receipt::verify_receipt_signature`] and is NOT in the
     /// chain hash.
+    ///
+    /// The lenient verifier checks the receipt signature when a keystore
+    /// is supplied. The strict demo profile has no keystore, so it
+    /// cannot verify a receipt; rather than accept one unchecked it
+    /// rejects any record that carries a receipt (see
+    /// [`crate::verify_demo`]).
     #[serde(default)]
     pub receipt: Option<Receipt>,
 }
@@ -489,6 +521,11 @@ pub fn compute_entry_hash_raw(entry: &WalEntry) -> [u8; 32] {
     hash_optional(&mut hasher, entry.source.as_deref(), v);
     hash_optional(&mut hasher, entry.signature.as_deref(), v);
     hash_optional(&mut hasher, entry.public_key.as_deref(), v);
+    // severity joined the preimage in version 2. Appending it only for
+    // v2 keeps every version-1 digest byte-for-byte what it was.
+    if v >= 2 {
+        hash_optional(&mut hasher, entry.severity.as_deref(), v);
+    }
     *hasher.finalize().as_bytes()
 }
 
@@ -519,6 +556,11 @@ pub fn compute_entry_hash_for_signing_raw(entry: &WalEntry) -> [u8; 32] {
     // signature and public_key fed as None on purpose: see module docs.
     hash_optional(&mut hasher, None, v);
     hash_optional(&mut hasher, None, v);
+    // severity is part of the signed content from version 2: a signature
+    // must commit to the same fields the chain hash does.
+    if v >= 2 {
+        hash_optional(&mut hasher, entry.severity.as_deref(), v);
+    }
     *hasher.finalize().as_bytes()
 }
 
@@ -623,6 +665,7 @@ mod tests {
             source: None,
             signature: None,
             public_key: None,
+            severity: None,
             key_id: None,
             event_id: None,
             stream_id: None,
@@ -982,5 +1025,47 @@ mod tests {
         assert!(is_supported_format_version(2));
         assert!(!is_supported_format_version(0));
         assert!(!is_supported_format_version(3));
+    }
+
+    #[test]
+    fn version_2_binds_severity_but_version_1_does_not() {
+        // The SRV-01 fix: under version 2 the severity label is in the
+        // hash, so flipping critical to info changes the digest and the
+        // chain link breaks. Under version 1 severity was never hashed,
+        // which is exactly why version-1 records cannot rely on it as a
+        // tamper-evident field.
+        let mut critical_v2 = make_entry_versioned(2, 1, 1000, GENESIS_PREV_HASH, "payload");
+        critical_v2.severity = Some("critical".into());
+        let mut info_v2 = make_entry_versioned(2, 1, 1000, GENESIS_PREV_HASH, "payload");
+        info_v2.severity = Some("info".into());
+        assert_ne!(
+            compute_entry_hash(&critical_v2),
+            compute_entry_hash(&info_v2),
+            "version 2 must commit to severity"
+        );
+
+        let mut critical_v1 = make_entry_versioned(1, 1, 1000, GENESIS_PREV_HASH, "payload");
+        critical_v1.severity = Some("critical".into());
+        let mut info_v1 = make_entry_versioned(1, 1, 1000, GENESIS_PREV_HASH, "payload");
+        info_v1.severity = Some("info".into());
+        assert_eq!(
+            compute_entry_hash(&critical_v1),
+            compute_entry_hash(&info_v1),
+            "version 1 never hashed severity, so the two must still match"
+        );
+    }
+
+    #[test]
+    fn sign_hash_covers_severity_in_version_2() {
+        // A signature must commit to the same content the chain does, so
+        // severity has to be in the sign hash too under version 2.
+        let mut a = make_entry_versioned(2, 1, 1000, GENESIS_PREV_HASH, "payload");
+        a.severity = Some("critical".into());
+        let mut b = make_entry_versioned(2, 1, 1000, GENESIS_PREV_HASH, "payload");
+        b.severity = Some("info".into());
+        assert_ne!(
+            compute_entry_hash_for_signing(&a),
+            compute_entry_hash_for_signing(&b)
+        );
     }
 }
