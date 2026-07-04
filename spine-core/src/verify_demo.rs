@@ -41,9 +41,11 @@
 //! Beyond the strict-vs-lenient axis above, the strict verifier
 //! enforces three invariants that the lenient path silently tolerates:
 //!
-//! * `format_version` must equal [`WAL_FORMAT_VERSION`]. A future
-//!   bump requires re-publishing the manifest with a new
-//!   `manifest_version`.
+//! * `format_version` must be one of
+//!   [`SUPPORTED_WAL_FORMAT_VERSIONS`], and the field must be present
+//!   (strict refuses a record that omits it). The entry hash is then
+//!   computed with the framing of that version. Adding a new version
+//!   requires re-publishing the manifest with a new `manifest_version`.
 //! * `hash_alg`, when present, must equal `"blake3"`.
 //! * `timestamp_ns` must be monotonically non-decreasing across
 //!   records.
@@ -65,8 +67,8 @@ use subtle::ConstantTimeEq;
 
 use crate::canonical::canonical_json;
 use crate::wal_entry::{
-    compute_entry_hash, compute_entry_hash_for_signing, validate_entry_hashes, WalEntry,
-    GENESIS_PREV_HASH, WAL_FORMAT_VERSION,
+    compute_entry_hash, compute_entry_hash_for_signing, is_supported_format_version,
+    validate_entry_hashes, WalEntry, GENESIS_PREV_HASH,
 };
 use crate::VERIFIER_VERSION;
 
@@ -145,27 +147,65 @@ pub enum InvalidReason {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RejectedReason {
-    ParseError { line: usize, details: String },
-    UnsupportedFormatVersion { found: u32 },
-    UnsupportedHashAlg { found: String },
+    ParseError {
+        line: usize,
+        details: String,
+    },
+    UnsupportedFormatVersion {
+        found: u32,
+    },
+    UnsupportedHashAlg {
+        found: String,
+    },
     UnsignedRecord,
     PubkeyMismatch,
-    SignatureMalformed { details: String },
-    PubkeyMalformed { details: String },
+    SignatureMalformed {
+        details: String,
+    },
+    PubkeyMalformed {
+        details: String,
+    },
     NoPayload,
-    PayloadTooLarge { bytes: usize, limit: usize },
-    LineTooLarge { bytes: usize, limit: usize },
-    NonCanonicalPayload { details: String },
-    TooManyRecords { limit: usize },
-    UnknownField { field: String },
+    PayloadTooLarge {
+        bytes: usize,
+        limit: usize,
+    },
+    LineTooLarge {
+        bytes: usize,
+        limit: usize,
+    },
+    NonCanonicalPayload {
+        details: String,
+    },
+    TooManyRecords {
+        limit: usize,
+    },
+    UnknownField {
+        field: String,
+    },
+    /// The record carries a server receipt, but the strict profile has
+    /// no keystore to check the receipt signature against. Accepting it
+    /// would present an unverified attestation as if it had passed, so
+    /// the strict profile refuses the record instead.
+    ReceiptUnverifiable,
 }
 
 /// Every JSON key the strict profile recognizes on a record: the canonical
 /// [`WalEntry`] field names plus their serde aliases. The strict verifier
-/// rejects a record carrying any other key, so the playground's
-/// "every byte of the record is accounted for" guarantee holds: a key that
-/// `serde` would otherwise silently ignore (a typo, a renamed field, or an
-/// injected extra field) cannot ride along on an otherwise-valid record.
+/// rejects a record carrying any other key, so a key that `serde` would
+/// otherwise silently ignore (a typo, a renamed field, or an injected
+/// extra field) cannot ride along on an otherwise-valid record.
+///
+/// Under format version 2 every field in this list that carries content
+/// is also part of the entry hash, so "every byte of the record is
+/// accounted for" holds in the strong sense: an accepted field cannot be
+/// altered without breaking the chain. Under version 1 the metadata
+/// fields (`key_id`, `event_id`, `stream_id`) were accepted but not
+/// hashed, so for a version-1 record they are accounted for only as
+/// "present and allowlisted", not as tamper-evident. The demo is version
+/// 1 today; that is why `payload`, which a version-1 record does not
+/// hash directly, is instead pinned by the recomputed `payload_hash`.
+///
 /// The lenient profile keeps tolerating unknown fields for compatibility
 /// with heterogeneous production producers; this allowlist is strict-only.
 const STRICT_ALLOWED_KEYS: &[&str] = &[
@@ -191,6 +231,7 @@ const STRICT_ALLOWED_KEYS: &[&str] = &[
     "public_key",
     "pubkey",
     "pk",
+    "severity",
     "key_id",
     "event_id",
     "stream_id",
@@ -468,7 +509,12 @@ fn strict_check_record(
     if !format_version_declared {
         return RecordResult::Rejected(RejectedReason::UnsupportedFormatVersion { found: 0 });
     }
-    if entry.format_version != WAL_FORMAT_VERSION {
+    // Accept any version this build knows how to hash, not only the
+    // latest. The entry hash dispatches on `format_version`, so a
+    // version-1 WAL still verifies against its own framing after the
+    // emit version moves to 2. Rejecting here would break every WAL
+    // file written before the bump, including the published demo.
+    if !is_supported_format_version(entry.format_version) {
         return RecordResult::Rejected(RejectedReason::UnsupportedFormatVersion {
             found: entry.format_version,
         });
@@ -479,6 +525,17 @@ fn strict_check_record(
                 found: alg.to_string(),
             });
         }
+    }
+
+    // A receipt is a separately-signed server attestation. Verifying it
+    // needs the server's receipt key, which the strict demo profile does
+    // not carry (the browser has no keystore). Rather than let an
+    // unverifiable receipt ride along on an otherwise-valid record, and
+    // so appear verified, the strict profile refuses any record that
+    // carries one. The lenient profile is where receipts are checked,
+    // and only when a keystore is supplied.
+    if entry.receipt.is_some() {
+        return RecordResult::Rejected(RejectedReason::ReceiptUnverifiable);
     }
 
     let (sig_hex, pk_hex) = match (entry.signature.as_deref(), entry.public_key.as_deref()) {
@@ -681,7 +738,7 @@ fn constant_time_hex_eq(a: &str, b: &str) -> bool {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::wal_entry::compute_entry_hash;
+    use crate::wal_entry::{compute_entry_hash, WAL_FORMAT_VERSION};
     use ed25519_dalek::{Signer, SigningKey};
     use serde_json::json;
 
@@ -697,7 +754,7 @@ mod tests {
         let canonical = canonical_json(&payload).unwrap();
         let payload_hash = hex::encode(blake3::hash(&canonical).as_bytes());
         WalEntry {
-            format_version: 1,
+            format_version: WAL_FORMAT_VERSION,
             sequence: seq,
             timestamp_ns: ts,
             prev_hash: prev.to_string(),
@@ -706,6 +763,7 @@ mod tests {
             source: None,
             signature: None,
             public_key: None,
+            severity: None,
             key_id: None,
             event_id: None,
             stream_id: None,
@@ -789,6 +847,45 @@ mod tests {
                 reason: RejectedReason::UnsignedRecord
             }
         ));
+    }
+
+    #[test]
+    fn record_carrying_a_receipt_is_rejected_by_strict() {
+        // The strict profile has no keystore, so it cannot verify a
+        // server receipt. It must refuse a record that carries one rather
+        // than accept it with the receipt unchecked, otherwise an
+        // unverified attestation would ride along on a "valid" record.
+        use crate::receipt::Receipt;
+        let (sk, pk_hex) = signer_keypair(0x30);
+        let (mut entries, root) = build_chain(1, &sk);
+        // Attaching a receipt does not change the entry hash (receipt is
+        // not hashed), so the chain root stays valid; the record must be
+        // rejected specifically for the unverifiable receipt.
+        entries[0].receipt = Some(Receipt {
+            event_id: "evt-1".to_string(),
+            payload_hash: entries[0].payload_hash.clone(),
+            server_time: "2026-07-01T00:00:00Z".to_string(),
+            server_seq: 1,
+            receipt_sig: "00".repeat(64),
+            server_key_id: "srv".to_string(),
+            sig_alg: "ed25519".to_string(),
+            batch_id: None,
+        });
+
+        let bytes = to_jsonl(&entries);
+        let report = verify_demo_wal(&bytes, &pk_hex, &root, 1);
+        assert_eq!(report.status, DemoStatus::Invalid);
+        let last = report.records.last().unwrap();
+        assert!(
+            matches!(
+                &last.outcome,
+                DemoRecordOutcome::Rejected {
+                    reason: RejectedReason::ReceiptUnverifiable
+                }
+            ),
+            "expected ReceiptUnverifiable, got {:?}",
+            last.outcome
+        );
     }
 
     #[test]

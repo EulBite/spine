@@ -246,6 +246,9 @@ fn seal_chain(signing_key: &SigningKey) -> Result<(Vec<WalEntry>, Vec<u8>, Strin
             source: Some(rec.source.to_string()),
             signature: None,
             public_key: None,
+            // The demo scenario does not label severity, so it stays
+            // None. Under version 2 that hashes as an absent field.
+            severity: None,
             key_id: None,
             event_id: None,
             stream_id: None,

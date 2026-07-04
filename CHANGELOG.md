@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- WAL format version 2 for the entry hash. Optional fields are now
+  length-prefixed (`0x01 || u64_LE(len) || value`) so a value can no longer
+  imitate the boundary of the next field, and `severity`, `key_id`, `event_id`,
+  and `stream_id` join the hashed preimage. Verifiers keep accepting version-1
+  records and hash them with the original framing, so existing WAL files and the
+  published demo continue to verify unchanged.
+- Rejection of ASCII control characters in the free-text record fields
+  (`event_type`, `source`, `severity`, and the SDK metadata identifiers). These
+  fields are short identifiers where control characters carry no meaning, and
+  refusing them also closes the version-1 collision (see Fixed) for records
+  still read under the old framing.
+- Cross-language vectors for version 2, including injectivity witnesses and
+  cases for the newly bound severity and metadata fields, so a re-implementation
+  proves it frames every hashed field the same way.
 - `spine-cli verify --strict`: verify a WAL under the strict profile (the same
   contract the browser playground runs). Pins the signing key from
   `--trusted-pubkey`, requires `--expected-root`, and recomputes each
@@ -24,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `WAL_FORMAT_VERSION` is now 2. New producers emit version 2; the verifier
+  reads each record's declared version and hashes it with the framing of that
+  version, so a single build verifies both v1 and v2 WAL files.
+- The strict verifier accepts any supported format version rather than only the
+  latest, which is what lets an already-published version-1 demo keep verifying
+  after the bump.
 - `spine-core`: parse fixed-width hex strings with `try_into`.
 - Resolved `clippy` pedantic and nursery lints across `spine-cli` and
   `spine-wasm`.
@@ -35,6 +55,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The WAL entry hash was not injective. A `U+0001` byte inside `event_type` or
+  `source` could imitate the presence marker of the following field, so two
+  semantically different records hashed to the same digest. It was reachable
+  from arbitrary ingest text, which weakened the chain against a forger. The
+  version-2 length prefix removes the ambiguity.
+- The strict verifier committed to only part of each record it accepted:
+  `key_id`, `event_id`, and `stream_id` were on the allowlist but outside the
+  hash, so all three could be altered on an otherwise-valid record and it still
+  verified. Version 2 binds them, so a field the verifier accepts can no longer
+  ride along unauthenticated.
+- The strict verifier now rejects a record that carries a receipt it cannot
+  verify instead of accepting it unchecked. Receipts remain verifiable under the
+  lenient profile when a keystore is supplied.
 - `spine-core`: canonical JSON now rejects integer-valued floats outside `i64`
   range instead of saturating the cast, tightening payload encoding so distinct
   payloads always serialise to distinct canonical bytes.

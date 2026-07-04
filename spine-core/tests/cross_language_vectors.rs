@@ -91,6 +91,7 @@ struct SignatureCase {
 
 #[derive(Deserialize, Clone)]
 struct WalEntryFixture {
+    format_version: u32,
     sequence: u64,
     timestamp_ns: i64,
     prev_hash: String,
@@ -99,11 +100,19 @@ struct WalEntryFixture {
     source: Option<String>,
     signature: Option<String>,
     public_key: Option<String>,
+    #[serde(default)]
+    severity: Option<String>,
+    #[serde(default)]
+    key_id: Option<String>,
+    #[serde(default)]
+    event_id: Option<String>,
+    #[serde(default)]
+    stream_id: Option<String>,
 }
 
 fn fixture_to_entry(f: &WalEntryFixture) -> WalEntry {
     WalEntry {
-        format_version: 1,
+        format_version: f.format_version,
         sequence: f.sequence,
         timestamp_ns: f.timestamp_ns,
         prev_hash: f.prev_hash.clone(),
@@ -112,9 +121,10 @@ fn fixture_to_entry(f: &WalEntryFixture) -> WalEntry {
         source: f.source.clone(),
         signature: f.signature.clone(),
         public_key: f.public_key.clone(),
-        key_id: None,
-        event_id: None,
-        stream_id: None,
+        severity: f.severity.clone(),
+        key_id: f.key_id.clone(),
+        event_id: f.event_id.clone(),
+        stream_id: f.stream_id.clone(),
         hash_alg: None,
         payload: None,
         receipt: None,
@@ -169,6 +179,32 @@ fn entry_hash_matches_every_case() {
             case.name
         );
     }
+}
+
+#[test]
+fn injectivity_witness_cases_have_distinct_hashes() {
+    // The two version-2 witness entries split the same bytes across
+    // event_type/source differently. Their pinned hashes must differ:
+    // a reimplementation that produces equal hashes for them has not
+    // length-prefixed the optional fields and is still vulnerable to
+    // the version-1 collision.
+    let v = load_vectors();
+    let left = v
+        .entry_hash
+        .cases
+        .iter()
+        .find(|c| c.name == "injectivity_witness_left_v2")
+        .expect("left witness case present");
+    let right = v
+        .entry_hash
+        .cases
+        .iter()
+        .find(|c| c.name == "injectivity_witness_right_v2")
+        .expect("right witness case present");
+    assert_ne!(
+        left.expected_entry_hash, right.expected_entry_hash,
+        "version-2 framing must keep the two witness entries distinct"
+    );
 }
 
 #[test]

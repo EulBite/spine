@@ -23,6 +23,33 @@ import { useEffect, useRef, useState } from 'react';
 
 const MANIFEST_URL = '/playground/manifest.json';
 
+// The public key the demo WAL is expected to be signed under, pinned
+// in the bundle rather than read from the manifest.
+//
+// Why this is not just taken from the manifest: the manifest also
+// carries `expected_public_key` and `expected_chain_root`, but the
+// browser fetches the manifest from the same origin it fetches
+// everything else from. A manifest that pins its own key is circular:
+// an origin that served a malicious manifest would also serve the key
+// that "verifies" it, so the pin proves nothing against that origin.
+//
+// Baking the key into the shipped JS moves the anchor out of the
+// fetched JSON. It does not escape trusting the origin that serves
+// this JS (a browser verifier always trusts wherever its code comes
+// from), but it does mean the key travels with the reviewed, published
+// source instead of with the data it is meant to authenticate, and it
+// composes with the manifest being published in more than one place:
+// a reader can diff this constant against those copies. When the demo
+// signing key rotates, update this constant in the same commit that
+// republishes the manifest.
+//
+// Set to null to fall back to the manifest-supplied key (development
+// only). In that mode the circular-trust gap above is open, so a real
+// deployment must pin the actual demo key here (as the value below
+// shows) rather than ship null.
+const PINNED_PUBLIC_KEY =
+  '39074fee39061183266879e928ba4f908c6048afc6fa71aedec66b8cb784632c';
+
 // Module-scoped handles populated by bootstrap() once the glue is
 // verified and the wasm module is initialised.
 let initWasm = null;          // default export from spine_wasm.js
@@ -51,6 +78,22 @@ async function bootstrap() {
     if (manifest.schema_version !== 1) {
         throw new BootstrapError('schema_version_mismatch',
             `Manifest schema version ${manifest.schema_version} not supported by this build.`);
+    }
+
+    // Break the manifest's circular trust: if the bundle pins a key,
+    // the manifest must agree with it. A manifest that names a
+    // different key is either a stale republish or a swapped manifest
+    // from a compromised origin; either way we refuse rather than
+    // verify against an attacker-chosen key. The comparison is a plain
+    // string equality on lowercase hex, which is fine here: the pin is
+    // public and not a secret, so there is nothing for a timing channel
+    // to leak.
+    if (PINNED_PUBLIC_KEY !== null
+        && manifest.expected_public_key !== PINNED_PUBLIC_KEY) {
+        throw new BootstrapError('pinned_key_mismatch',
+            'Manifest public key does not match the key pinned in this '
+            + 'build. Refusing to verify against a key supplied only by '
+            + 'the manifest.');
     }
 
     // 2. WAL bytes + hash check
@@ -258,9 +301,15 @@ export default function DemoSection() {
         // are namespaced separately so the manifest envelope can
         // evolve without forcing the verifier's pinned version axis to
         // move in lockstep.
+        // Verify against the pinned key when the bundle carries one, so
+        // the trust anchor is the reviewed source, not the fetched
+        // manifest. bootstrap() has already refused any manifest whose
+        // key disagreed, so the two are equal here when the pin is set;
+        // preferring the pin makes the source of truth explicit.
+        const trustedPublicKey = PINNED_PUBLIC_KEY ?? manifest.expected_public_key;
         const json = verifyDemoWalJson(
             tampered,
-            manifest.expected_public_key,
+            trustedPublicKey,
             manifest.expected_chain_root,
             manifest.manifest_version,
         );
