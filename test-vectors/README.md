@@ -110,19 +110,29 @@ entry_hash_raw = BLAKE3(
     presence(source)               ||
     presence(signature)            ||
     presence(public_key)           ||
-    presence(severity)                 // version 2 only, omitted for version 1
+    presence(severity)             ||  // fields 9..12 are version 2 only,
+    presence(key_id)               ||  // omitted entirely for version 1
+    presence(event_id)             ||
+    presence(stream_id)
 )
 ```
 
-`severity` is hashed only from format version 2 onward. A version-1
-preimage stops after `public_key`; a version-2 preimage appends
-`presence(severity)` as a ninth field. It is hashed because consumers
-(dashboards, alerting) read the severity label to decide what is
-critical, and if it were outside the hash an edit to a stored record
-could flip `critical` to `info` without breaking the chain. The
-`entry_hash` section includes `severity_critical_v2` / `severity_info_v2`
-(whose hashes must differ) and `severity_critical_v1` / `severity_info_v1`
-(whose hashes must match, since version 1 never covered the field).
+Fields 9 through 12 (`severity`, `key_id`, `event_id`, `stream_id`) are
+hashed only from format version 2 onward, in that exact order. A
+version-1 preimage stops after `public_key`; a version-2 preimage
+appends all four. They are hashed so that every field the strict
+verifier accepts on a record is committed: without this a record could
+carry an altered `severity`, `key_id`, `event_id`, or `stream_id` and
+still verify, since only those four were previously outside the hash.
+`severity` in particular is read by consumers (dashboards, alerting) to
+decide what is critical, so leaving it outside the hash would let an edit
+flip `critical` to `info` without breaking the chain.
+
+The `entry_hash` section pins this both ways. `severity_critical_v2` /
+`severity_info_v2` must hash differently, `severity_critical_v1` /
+`severity_info_v1` must match (version 1 never covered severity), and
+`sdk_metadata_v2` / `sdk_metadata_v1` do the same for the three metadata
+fields together.
 
 where the framing for an optional string field depends on the entry's
 `format_version`:
@@ -193,7 +203,8 @@ sign_hash_raw = BLAKE3(
 `presence` is the same version-aware framing as in §3 (the two forced
 `None` fields are a single `b"\x00"` in both versions, so only
 `event_type` and `source` differ between v1 and v2). Under version 2
-the sign hash also appends `presence(severity)` after the two forced
+the sign hash also appends `presence(severity)`, `presence(key_id)`,
+`presence(event_id)`, `presence(stream_id)` after the two forced
 `None` fields, matching the chain hash: a signature has to commit to
 the same content the chain does.
 

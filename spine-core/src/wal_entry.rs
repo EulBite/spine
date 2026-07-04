@@ -15,13 +15,19 @@
 //! 6. `source`, same framing as `event_type`
 //! 7. `signature`, same framing as `event_type`
 //! 8. `public_key`, same framing as `event_type`
-//! 9. `severity`, same framing as `event_type`, hashed only from
-//!    format version 2 onward (version-1 records stop at field 8)
+//! 9. `severity`, same framing as `event_type`
+//! 10. `key_id`, same framing as `event_type`
+//! 11. `event_id`, same framing as `event_type`
+//! 12. `stream_id`, same framing as `event_type`
 //!
-//! Field 9 is version-gated: a version-1 preimage ends after
-//! `public_key`, a version-2 preimage appends `severity`. This keeps
-//! version-1 digests unchanged while making the severity label a
-//! consumer trusts tamper-evident under version 2.
+//! Fields 9 through 12 are version-gated: a version-1 preimage ends
+//! after `public_key`, a version-2 preimage appends `severity`,
+//! `key_id`, `event_id`, and `stream_id` in that order. This keeps
+//! version-1 digests unchanged while committing, under version 2, to
+//! every field the strict verifier accepts on a record. Without this a
+//! record could carry an altered `key_id`/`event_id`/`stream_id` and
+//! still verify, so the strict promise that every accepted byte is
+//! accounted for would not hold.
 //!
 //! ## How an optional field is framed, and why it has two versions
 //!
@@ -89,9 +95,10 @@
 //!       with no length prefix (2026-05). Retained for already-emitted
 //!       WAL files; not collision-free, see above.
 //!   2 - Optional fields length-prefixed `0x01 || u64_LE(len) || value`,
-//!       which makes the entry hash injective, AND `severity` added as a
-//!       ninth hashed field so a consumer-trusted label cannot be edited
-//!       without breaking the chain (2026-06).
+//!       which makes the entry hash injective, AND `severity`, `key_id`,
+//!       `event_id`, `stream_id` added as hashed fields 9 through 12 so
+//!       every field the strict verifier accepts is committed and cannot
+//!       be edited without breaking the chain (2026-06).
 
 use blake3::Hasher;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -250,6 +257,9 @@ pub fn validate_entry_hashes(entry: &WalEntry) -> Vec<String> {
         ("event_type", entry.event_type.as_deref()),
         ("source", entry.source.as_deref()),
         ("severity", entry.severity.as_deref()),
+        ("key_id", entry.key_id.as_deref()),
+        ("event_id", entry.event_id.as_deref()),
+        ("stream_id", entry.stream_id.as_deref()),
     ] {
         if let Some(v) = value {
             if let Some((pos, ch)) = first_control_char(v) {
@@ -428,16 +438,19 @@ pub struct WalEntry {
     #[serde(default)]
     pub severity: Option<String>,
 
-    /// Short identifier for the signing key, SDK metadata only,
-    /// NOT in the chain hash.
+    /// Short identifier for the signing key. SDK metadata. Part of the
+    /// chain hash from format version 2 (field 10); version-1 records did
+    /// not cover it.
     #[serde(default)]
     pub key_id: Option<String>,
 
-    /// Unique event identifier, SDK metadata only, NOT in the chain hash.
+    /// Unique event identifier. SDK metadata. Part of the chain hash from
+    /// format version 2 (field 11); version-1 records did not cover it.
     #[serde(default)]
     pub event_id: Option<String>,
 
-    /// Stream identifier, SDK metadata only, NOT in the chain hash.
+    /// Stream identifier. SDK metadata. Part of the chain hash from
+    /// format version 2 (field 12); version-1 records did not cover it.
     #[serde(default)]
     pub stream_id: Option<String>,
 
@@ -521,10 +534,15 @@ pub fn compute_entry_hash_raw(entry: &WalEntry) -> [u8; 32] {
     hash_optional(&mut hasher, entry.source.as_deref(), v);
     hash_optional(&mut hasher, entry.signature.as_deref(), v);
     hash_optional(&mut hasher, entry.public_key.as_deref(), v);
-    // severity joined the preimage in version 2. Appending it only for
-    // v2 keeps every version-1 digest byte-for-byte what it was.
+    // severity and the SDK metadata joined the preimage in version 2.
+    // Appending them only for v2 keeps every version-1 digest
+    // byte-for-byte what it was. The order here is the contract; it must
+    // match the producer and never be reordered.
     if v >= 2 {
         hash_optional(&mut hasher, entry.severity.as_deref(), v);
+        hash_optional(&mut hasher, entry.key_id.as_deref(), v);
+        hash_optional(&mut hasher, entry.event_id.as_deref(), v);
+        hash_optional(&mut hasher, entry.stream_id.as_deref(), v);
     }
     *hasher.finalize().as_bytes()
 }
@@ -556,10 +574,14 @@ pub fn compute_entry_hash_for_signing_raw(entry: &WalEntry) -> [u8; 32] {
     // signature and public_key fed as None on purpose: see module docs.
     hash_optional(&mut hasher, None, v);
     hash_optional(&mut hasher, None, v);
-    // severity is part of the signed content from version 2: a signature
-    // must commit to the same fields the chain hash does.
+    // severity and the SDK metadata are part of the signed content from
+    // version 2: a signature must commit to the same fields the chain
+    // hash does, in the same order.
     if v >= 2 {
         hash_optional(&mut hasher, entry.severity.as_deref(), v);
+        hash_optional(&mut hasher, entry.key_id.as_deref(), v);
+        hash_optional(&mut hasher, entry.event_id.as_deref(), v);
+        hash_optional(&mut hasher, entry.stream_id.as_deref(), v);
     }
     *hasher.finalize().as_bytes()
 }
@@ -1067,5 +1089,36 @@ mod tests {
             compute_entry_hash_for_signing(&a),
             compute_entry_hash_for_signing(&b)
         );
+    }
+
+    #[test]
+    fn version_2_binds_sdk_metadata_but_version_1_does_not() {
+        // The ride-along fix: under version 2 an altered key_id, event_id,
+        // or stream_id changes the digest, so the strict verifier's
+        // accepted fields are all committed. Under version 1 they were
+        // accepted but not hashed, so editing them left the hash intact.
+        for mutate in [
+            |e: &mut WalEntry| e.key_id = Some("attacker".into()),
+            |e: &mut WalEntry| e.event_id = Some("evt-swapped".into()),
+            |e: &mut WalEntry| e.stream_id = Some("other-stream".into()),
+        ] {
+            let base_v2 = make_entry_versioned(2, 1, 1000, GENESIS_PREV_HASH, "payload");
+            let mut mutated_v2 = base_v2.clone();
+            mutate(&mut mutated_v2);
+            assert_ne!(
+                compute_entry_hash(&base_v2),
+                compute_entry_hash(&mutated_v2),
+                "version 2 must commit to SDK metadata"
+            );
+
+            let base_v1 = make_entry_versioned(1, 1, 1000, GENESIS_PREV_HASH, "payload");
+            let mut mutated_v1 = base_v1.clone();
+            mutate(&mut mutated_v1);
+            assert_eq!(
+                compute_entry_hash(&base_v1),
+                compute_entry_hash(&mutated_v1),
+                "version 1 never hashed SDK metadata"
+            );
+        }
     }
 }

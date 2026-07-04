@@ -107,6 +107,12 @@ struct WalEntryFixture {
     public_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     severity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_id: Option<String>,
 }
 
 impl From<&WalEntry> for WalEntryFixture {
@@ -122,6 +128,9 @@ impl From<&WalEntry> for WalEntryFixture {
             signature: e.signature.clone(),
             public_key: e.public_key.clone(),
             severity: e.severity.clone(),
+            key_id: e.key_id.clone(),
+            event_id: e.event_id.clone(),
+            stream_id: e.stream_id.clone(),
         }
     }
 }
@@ -324,6 +333,29 @@ fn entry_hash_cases() -> Vec<EntryHashCase> {
         name: "severity_info_v1".to_string(),
         input: WalEntryFixture::from(&sev_info_v1),
         expected_entry_hash: compute_entry_hash(&sev_info_v1),
+    });
+
+    // SDK metadata is hashed from version 2. A record carrying these
+    // fields must hash differently from one without them; under version
+    // 1 the same fields make no difference (they were not hashed).
+    let mut meta_v2 = entry_hash_base(2);
+    meta_v2.key_id = Some("key-7".to_string());
+    meta_v2.event_id = Some("evt-42".to_string());
+    meta_v2.stream_id = Some("stream-a".to_string());
+    cases.push(EntryHashCase {
+        name: "sdk_metadata_v2".to_string(),
+        input: WalEntryFixture::from(&meta_v2),
+        expected_entry_hash: compute_entry_hash(&meta_v2),
+    });
+
+    let mut meta_v1 = entry_hash_base(1);
+    meta_v1.key_id = Some("key-7".to_string());
+    meta_v1.event_id = Some("evt-42".to_string());
+    meta_v1.stream_id = Some("stream-a".to_string());
+    cases.push(EntryHashCase {
+        name: "sdk_metadata_v1".to_string(),
+        input: WalEntryFixture::from(&meta_v1),
+        expected_entry_hash: compute_entry_hash(&meta_v1),
     });
 
     cases

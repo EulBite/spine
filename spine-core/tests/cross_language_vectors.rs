@@ -102,6 +102,12 @@ struct WalEntryFixture {
     public_key: Option<String>,
     #[serde(default)]
     severity: Option<String>,
+    #[serde(default)]
+    key_id: Option<String>,
+    #[serde(default)]
+    event_id: Option<String>,
+    #[serde(default)]
+    stream_id: Option<String>,
 }
 
 fn fixture_to_entry(f: &WalEntryFixture) -> WalEntry {
@@ -116,9 +122,9 @@ fn fixture_to_entry(f: &WalEntryFixture) -> WalEntry {
         signature: f.signature.clone(),
         public_key: f.public_key.clone(),
         severity: f.severity.clone(),
-        key_id: None,
-        event_id: None,
-        stream_id: None,
+        key_id: f.key_id.clone(),
+        event_id: f.event_id.clone(),
+        stream_id: f.stream_id.clone(),
         hash_alg: None,
         payload: None,
         receipt: None,

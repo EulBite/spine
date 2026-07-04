@@ -192,10 +192,20 @@ pub enum RejectedReason {
 
 /// Every JSON key the strict profile recognizes on a record: the canonical
 /// [`WalEntry`] field names plus their serde aliases. The strict verifier
-/// rejects a record carrying any other key, so the playground's
-/// "every byte of the record is accounted for" guarantee holds: a key that
-/// `serde` would otherwise silently ignore (a typo, a renamed field, or an
-/// injected extra field) cannot ride along on an otherwise-valid record.
+/// rejects a record carrying any other key, so a key that `serde` would
+/// otherwise silently ignore (a typo, a renamed field, or an injected
+/// extra field) cannot ride along on an otherwise-valid record.
+///
+/// Under format version 2 every field in this list that carries content
+/// is also part of the entry hash, so "every byte of the record is
+/// accounted for" holds in the strong sense: an accepted field cannot be
+/// altered without breaking the chain. Under version 1 the metadata
+/// fields (`key_id`, `event_id`, `stream_id`) were accepted but not
+/// hashed, so for a version-1 record they are accounted for only as
+/// "present and allowlisted", not as tamper-evident. The demo is version
+/// 1 today; that is why `payload`, which a version-1 record does not
+/// hash directly, is instead pinned by the recomputed `payload_hash`.
+///
 /// The lenient profile keeps tolerating unknown fields for compatibility
 /// with heterogeneous production producers; this allowlist is strict-only.
 const STRICT_ALLOWED_KEYS: &[&str] = &[
