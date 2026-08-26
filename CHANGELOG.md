@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `spine-core`: exact, no-network verification of
+  `spine-public-checkpoint-v1` envelopes emitted by the private server. The
+  verifier pins the Ed25519 key from outside the envelope, covers every signed
+  field, and can reject stale or future checkpoints.
+- `spine-cli verify`: `--checkpoint`, `--checkpoint-pubkey`, and
+  `--checkpoint-max-age-secs` authenticate a server checkpoint and use its
+  `chain_root` as the WAL anchor. A conflicting explicit `--expected-root` is a
+  usage error.
+- Public documentation for current event-ingest, checkpoint, tenant isolation,
+  WebSocket, and production-versus-playground compatibility contracts.
+
+### Security
+
+- Updated the transitive `anyhow` test-tool dependency to 1.0.103, resolving
+  the `Error::downcast_mut` unsoundness tracked as RUSTSEC-2026-0190.
+
+## [0.2.0] - 2026-07-05
+
+### Added
+
 - WAL format version 2 for the entry hash. Optional fields are now
   length-prefixed (`0x01 || u64_LE(len) || value`) so a value can no longer
   imitate the boundary of the next field, and `severity`, `key_id`, `event_id`,
@@ -93,5 +113,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `playground-spec`: integration contract for embedding the in-browser
   verification playground.
 
-[Unreleased]: https://github.com/EulBite/spine/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/EulBite/spine/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/EulBite/spine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EulBite/spine/releases/tag/v0.1.0

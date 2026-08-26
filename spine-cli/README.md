@@ -38,6 +38,13 @@ spine-cli --format json verify --wal /path/to/wal
 spine-cli verify --strict --wal /path/to/wal \
   --trusted-pubkey <64-hex-pubkey> --expected-root <64-hex-root>
 
+# Production server export: verify the signed root checkpoint against an
+# out-of-band key, then replay the WAL without trusting record-declared keys.
+spine-cli verify --wal /path/to/wal --chain-only \
+  --checkpoint checkpoint.json \
+  --checkpoint-pubkey <64-hex-checkpoint-pubkey> \
+  --checkpoint-max-age-secs 300
+
 # Show 20 most recent events as a table
 spine-cli inspect --wal /path/to/wal -n 20
 
@@ -51,6 +58,11 @@ This binary verifies that a WAL is internally consistent: hash chain links,
 sequence continuity, timestamp monotonicity, signature validity (when both
 the signature and public key are present in the record), and optional
 agreement with a caller-supplied `--expected-root` anchor.
+
+It can also authenticate that anchor from a private Spine server's signed
+checkpoint. `--checkpoint-pubkey` is mandatory in that mode because the key
+embedded in the checkpoint cannot authenticate itself. See
+[server interoperability](../docs/server-interoperability.md).
 
 It does **not** verify operational integrity of any Spine deployment, key
 management practices, or compliance posture. Those concerns belong in audit

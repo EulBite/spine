@@ -17,8 +17,8 @@ use std::process::{Command, Output};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
 use spine_core::{
-    canonical_json, compute_entry_hash, compute_entry_hash_for_signing, WalEntry,
-    GENESIS_PREV_HASH, STRICT_DOMAIN_SEP,
+    canonical_json, compute_entry_hash, compute_entry_hash_for_signing, public_checkpoint_message,
+    PublicCheckpoint, WalEntry, CHECKPOINT_SCHEMA, GENESIS_PREV_HASH, STRICT_DOMAIN_SEP,
 };
 use tempfile::TempDir;
 
@@ -77,6 +77,32 @@ fn wal_dir() -> TempDir {
 
 fn path_str(p: &Path) -> &str {
     p.to_str().expect("path should be valid UTF-8")
+}
+
+fn write_checkpoint(path: &Path, chain_root: &str, seed: u8, timestamp_ns: i64) -> String {
+    let signing_key = SigningKey::from_bytes(&[seed; 32]);
+    let public_key = hex::encode(signing_key.verifying_key().to_bytes());
+    let mut checkpoint = PublicCheckpoint {
+        schema: CHECKPOINT_SCHEMA.to_string(),
+        chain_root: chain_root.to_string(),
+        event_count: 3,
+        last_sequence: 3,
+        timestamp_ns,
+        signature: String::new(),
+        public_key: public_key.clone(),
+        algorithm: "ed25519".to_string(),
+    };
+    checkpoint.signature = hex::encode(
+        signing_key
+            .sign(&public_checkpoint_message(&checkpoint))
+            .to_bytes(),
+    );
+    std::fs::write(
+        path,
+        serde_json::to_vec_pretty(&checkpoint).expect("checkpoint should serialize"),
+    )
+    .expect("checkpoint should write");
+    public_key
 }
 
 /// Write a 3-entry strict-profile WAL into `dir`: every record carries
@@ -265,6 +291,85 @@ fn verify_expected_root_gates_on_match() {
         &wrong,
     ]);
     assert_eq!(code(&bad), 1, "mismatched expected-root should fail");
+}
+
+#[test]
+fn verify_accepts_a_server_checkpoint_as_the_authenticated_root() {
+    let dir = wal_dir();
+    let first = run(&["verify", "--wal", path_str(dir.path()), "--format", "json"]);
+    let report: Value = serde_json::from_str(&stdout(&first)).expect("report should be JSON");
+    let root = report["chain_root"]
+        .as_str()
+        .expect("chain_root should be present");
+    let checkpoint_path = dir.path().join("checkpoint.json");
+    let pin = write_checkpoint(&checkpoint_path, root, 0x31, 1_780_000_000_000_000_000);
+
+    let out = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--chain-only",
+        "--checkpoint",
+        path_str(&checkpoint_path),
+        "--checkpoint-pubkey",
+        &pin,
+    ]);
+    assert_eq!(
+        code(&out),
+        0,
+        "a correctly signed checkpoint should authenticate the WAL root: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn verify_rejects_checkpoint_without_an_external_trust_anchor() {
+    let dir = wal_dir();
+    let checkpoint_path = dir.path().join("checkpoint.json");
+    let _ = write_checkpoint(
+        &checkpoint_path,
+        &"ab".repeat(32),
+        0x32,
+        1_780_000_000_000_000_000,
+    );
+    let out = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--checkpoint",
+        path_str(&checkpoint_path),
+    ]);
+    assert_eq!(
+        code(&out),
+        2,
+        "a self-declared checkpoint key must not pass"
+    );
+}
+
+#[test]
+fn verify_rejects_checkpoint_root_conflicting_with_explicit_root() {
+    let dir = wal_dir();
+    let checkpoint_path = dir.path().join("checkpoint.json");
+    let checkpoint_root = "ab".repeat(32);
+    let pin = write_checkpoint(
+        &checkpoint_path,
+        &checkpoint_root,
+        0x33,
+        1_780_000_000_000_000_000,
+    );
+    let different_root = "cd".repeat(32);
+    let out = run(&[
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--checkpoint",
+        path_str(&checkpoint_path),
+        "--checkpoint-pubkey",
+        &pin,
+        "--expected-root",
+        &different_root,
+    ]);
+    assert_eq!(code(&out), 2, "conflicting trust anchors must be refused");
 }
 
 #[test]

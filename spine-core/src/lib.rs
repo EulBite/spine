@@ -34,12 +34,17 @@
 #![forbid(unsafe_code)]
 
 pub mod canonical;
+pub mod checkpoint;
 pub mod receipt;
 pub mod verify;
 pub mod verify_demo;
 pub mod wal_entry;
 
 pub use canonical::{canonical_json, canonical_json_from_bytes, CanonicalError};
+pub use checkpoint::{
+    public_checkpoint_message, verify_public_checkpoint, CheckpointError, PublicCheckpoint,
+    CHECKPOINT_DOMAIN_SEP, CHECKPOINT_SCHEMA,
+};
 pub use receipt::{
     receipt_canonical_message, verify_receipt_against_keystore, verify_receipt_signature, Keystore,
     Receipt, ReceiptError, RECEIPT_DOMAIN_SEP,

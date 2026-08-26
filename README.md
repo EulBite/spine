@@ -59,6 +59,24 @@ signature verification stays the default. See
 measured numbers, the threat-model trade-offs of each policy, and the
 sub-linear proof-based model for the largest scenarios.
 
+## Verifying a private Spine server export
+
+`spine-cli` can verify the signed checkpoint returned by
+`GET /api/v1/checkpoint/public` and use its authenticated `chain_root` as the
+WAL anchor. The checkpoint key must be pinned from outside the checkpoint:
+
+```bash
+spine-cli verify --wal /path/to/wal \
+  --checkpoint checkpoint.json \
+  --checkpoint-pubkey <64-hex-checkpoint-pubkey> \
+  --checkpoint-max-age-secs 300 \
+  --chain-only
+```
+
+See [private server interoperability](docs/server-interoperability.md) for the
+current REST calls, trust model, and the distinction between production and
+playground verification profiles.
+
 ## What this verifies, and what it does not
 
 This codebase verifies that a given Spine WAL file is internally consistent and matches a pinned

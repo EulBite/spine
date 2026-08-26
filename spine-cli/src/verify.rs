@@ -7,8 +7,8 @@ use std::fs;
 use std::path::Path;
 
 use spine_core::{
-    verify_demo_wal, DemoRecordOutcome, DemoReport, DemoStatus, Keystore, LenientOptions,
-    LenientVerifier, SignaturePolicy, VerificationResult,
+    verify_demo_wal, verify_public_checkpoint, DemoRecordOutcome, DemoReport, DemoStatus, Keystore,
+    LenientOptions, LenientVerifier, PublicCheckpoint, SignaturePolicy, VerificationResult,
 };
 
 use crate::wal_io::{for_each_wal_line, read_wal_bytes, WalIoError};
@@ -33,12 +33,21 @@ pub enum VerifyCmdError {
 
     #[error("Report serialisation failed: {0}")]
     Serialize(#[from] serde_json::Error),
+
+    #[error("Checkpoint could not be read: {0}")]
+    CheckpointRead(std::io::Error),
+
+    #[error("Checkpoint verification failed: {0}")]
+    Checkpoint(String),
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     wal_path: &Path,
     expected_root: Option<&str>,
+    checkpoint_path: Option<&Path>,
+    checkpoint_pubkey: Option<&str>,
+    checkpoint_max_age_secs: Option<u64>,
     output_path: Option<&Path>,
     fail_fast: bool,
     keystore_path: Option<&Path>,
@@ -49,6 +58,14 @@ pub fn run(
     manifest_version: u32,
     format: OutputFormat,
 ) -> Result<bool, VerifyCmdError> {
+    let expected_root = resolve_expected_root(
+        expected_root,
+        checkpoint_path,
+        checkpoint_pubkey,
+        checkpoint_max_age_secs,
+    )?;
+    let expected_root = expected_root.as_deref();
+
     // Reduced signature policies are a lenient-profile feature: the strict
     // profile verifies every signature of the (capped) demo WAL by
     // contract, so a request to skip or sample them there is a usage error.
@@ -134,6 +151,50 @@ pub fn run(
 
     emit_report(&result, output_path, format)?;
     Ok(result.valid)
+}
+
+fn resolve_expected_root(
+    expected_root: Option<&str>,
+    checkpoint_path: Option<&Path>,
+    checkpoint_pubkey: Option<&str>,
+    checkpoint_max_age_secs: Option<u64>,
+) -> Result<Option<String>, VerifyCmdError> {
+    let Some(path) = checkpoint_path else {
+        if checkpoint_pubkey.is_some() || checkpoint_max_age_secs.is_some() {
+            return Err(VerifyCmdError::Usage(
+                "--checkpoint-pubkey and --checkpoint-max-age-secs require --checkpoint"
+                    .to_string(),
+            ));
+        }
+        return Ok(expected_root.map(ToOwned::to_owned));
+    };
+
+    let pin = checkpoint_pubkey.ok_or_else(|| {
+        VerifyCmdError::Usage(
+            "--checkpoint requires --checkpoint-pubkey from a trusted, out-of-band channel"
+                .to_string(),
+        )
+    })?;
+    let json = fs::read_to_string(path).map_err(VerifyCmdError::CheckpointRead)?;
+    let checkpoint: PublicCheckpoint = serde_json::from_str(&json)
+        .map_err(|error| VerifyCmdError::Checkpoint(error.to_string()))?;
+    let now_ns = chrono::Utc::now().timestamp_nanos_opt().ok_or_else(|| {
+        VerifyCmdError::Checkpoint("system clock is outside the supported nanosecond range".into())
+    })?;
+    verify_public_checkpoint(&checkpoint, pin, now_ns, checkpoint_max_age_secs)
+        .map_err(|error| VerifyCmdError::Checkpoint(error.to_string()))?;
+
+    if let Some(explicit) = expected_root {
+        let normalized = normalize_hex(explicit);
+        if normalized != checkpoint.chain_root {
+            return Err(VerifyCmdError::Usage(format!(
+                "--expected-root ({normalized}) does not match the authenticated checkpoint root ({})",
+                checkpoint.chain_root
+            )));
+        }
+    }
+
+    Ok(Some(checkpoint.chain_root))
 }
 
 /// When every record fails signature verification under the lenient

@@ -15,6 +15,21 @@ permissions:
   contents: read
 
 jobs:
+  dependency-audit:
+    name: RustSec dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.1
+
+      - name: Fail on RustSec advisories and warnings
+        run: cargo audit -D warnings
+
   test:
     name: cargo test (workspace)
     runs-on: ubuntu-latest

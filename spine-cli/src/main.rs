@@ -91,6 +91,24 @@ enum Commands {
         #[arg(long)]
         expected_root: Option<String>,
 
+        /// Signed checkpoint JSON returned by the private Spine server's
+        /// `GET /api/v1/checkpoint/public` endpoint. Its authenticated
+        /// `chain_root` becomes the expected root. Requires an out-of-band
+        /// key pin in `--checkpoint-pubkey`.
+        #[arg(long, value_name = "FILE")]
+        checkpoint: Option<PathBuf>,
+
+        /// 64-char hex Ed25519 public key used to verify `--checkpoint`.
+        /// This must come from a trusted channel; the key embedded in the
+        /// checkpoint is never accepted as its own trust anchor.
+        #[arg(long, value_name = "64-HEX-PUBKEY")]
+        checkpoint_pubkey: Option<String>,
+
+        /// Reject a checkpoint older than this many seconds, or dated in
+        /// the future. Omit only when historical checkpoints are expected.
+        #[arg(long, value_name = "SECONDS")]
+        checkpoint_max_age_secs: Option<u64>,
+
         /// Write the JSON verification report to this path. Without
         /// it the report goes to stdout under `--format json` or to
         /// the terminal under `--format text`.
@@ -129,8 +147,9 @@ enum Commands {
         /// Verify under the strict profile: the same contract the
         /// browser playground runs. Every record must be signed, the
         /// signing key is pinned from `--trusted-pubkey` (mandatory),
-        /// `--expected-root` is mandatory, and each `payload_hash` is
-        /// recomputed from the canonical JSON of the inline payload.
+        /// a root from `--expected-root` or a verified `--checkpoint` is
+        /// mandatory, and each `payload_hash` is recomputed from the
+        /// canonical JSON of the inline payload.
         /// Strict signatures are domain-separated, so a strict-profile
         /// WAL (for example the published Spine demo WAL) fails the
         /// default lenient path; pass `--strict` to verify it.
@@ -142,9 +161,10 @@ enum Commands {
         /// checks dominate the cost on a large WAL, so this is much
         /// faster while still streaming at constant memory. It retains
         /// tamper-evidence only when paired with an authenticated
-        /// `--expected-root`; without one it proves internal
-        /// self-consistency. Lenient profile only; incompatible with
-        /// `--trusted-pubkey`, `--keystore` and `--sample-signatures`.
+        /// `--expected-root` or verified `--checkpoint`; without one it
+        /// proves internal self-consistency. Lenient profile only;
+        /// incompatible with `--trusted-pubkey`, `--keystore` and
+        /// `--sample-signatures`.
         #[arg(long)]
         chain_only: bool,
 
@@ -250,6 +270,9 @@ fn main() -> ExitCode {
         Commands::Verify {
             wal,
             expected_root,
+            checkpoint,
+            checkpoint_pubkey,
+            checkpoint_max_age_secs,
             output,
             fail_fast,
             keystore,
@@ -261,6 +284,9 @@ fn main() -> ExitCode {
         } => verify::run(
             &wal,
             expected_root.as_deref(),
+            checkpoint.as_deref(),
+            checkpoint_pubkey.as_deref(),
+            checkpoint_max_age_secs,
             output.as_deref(),
             fail_fast,
             keystore.as_deref(),
