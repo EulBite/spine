@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-31
+
 ### Added
 
+- `spine-core`: pure verification for `spine-checkpoint-receipt-v2`, chained
+  checkpoint histories, independently pinned witness observations and
+  cross-signed operator-key rotation.
+- `spine-core`: tenant-scoped `spine-audit-pack-v1` verification, including
+  tenant identity, versioned payload hashes, event ordering, signed interval
+  commitments and the embedded checkpoint proof.
+- `spine-cli verify-checkpoint` and `verify-audit-pack`, witness-required by
+  default with an explicit `--allow-unwitnessed` downgrade.
+- WASM entry points for individual checkpoints, checkpoint histories and audit
+  packs, with bounded JSON inputs and structured valid/invalid reports.
+- Server-generated interoperability fixtures covering rotation, witness and a
+  complete tenant audit pack.
 - `spine-core`: exact, no-network verification of
   `spine-public-checkpoint-v1` envelopes emitted by the private server. The
   verifier pins the Ed25519 key from outside the envelope, covers every signed
@@ -22,8 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- External pins are compared in constant time; embedded signed fields require
+  canonical lowercase hex. Witness observations cannot predate their
+  checkpoint, move backwards in a history or claim a future observation under
+  a caller-supplied clock.
 - Updated the transitive `anyhow` test-tool dependency to 1.0.103, resolving
   the `Error::downcast_mut` unsoundness tracked as RUSTSEC-2026-0190.
+
+### Changed
+
+- `WAL_FORMAT_VERSION` is now 3. New producer records hash payloads with the
+  same NFC-normalized canonical JSON used by the public verifier. Versions 1
+  and 2 retain their historical payload encoding and remain verifiable.
 
 ## [0.2.0] - 2026-07-05
 
@@ -113,6 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `playground-spec`: integration contract for embedding the in-browser
   verification playground.
 
-[Unreleased]: https://github.com/EulBite/spine/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/EulBite/spine/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/EulBite/spine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/EulBite/spine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EulBite/spine/releases/tag/v0.1.0

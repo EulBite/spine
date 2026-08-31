@@ -80,8 +80,53 @@ The public playground's `--strict` profile instead recomputes every
 on every record. It is the published demo contract, not a drop-in replacement
 for production-server WAL verification.
 
-Both repositories agree on WAL format v2 entry hashing. The public verifier
-also retains v1 support for existing evidence.
+WAL formats v1 and v2 retain their historical payload representation. New
+production records use WAL format v3: their `payload_hash` is computed from the
+same NFC-normalized, UTF-16-key-ordered canonical JSON used by `spine-core` and
+the browser verifier. Format v3 keeps the injective v2 entry framing. The public
+verifier retains v1/v2 support, so existing evidence is never reinterpreted.
+
+## Witnessed checkpoint history and tenant audit packs
+
+The evidence API exposes the independently verifiable proof surface:
+
+- `GET /api/v2/checkpoints/latest`: latest persisted checkpoint receipt;
+- `GET /api/v2/checkpoints/history`: paginated receipt history;
+- `POST /api/v2/audit-packs`: tenant-scoped evidence bundle.
+
+A v2 checkpoint commits to the global chain root and to each tenant's events in
+the newly covered interval. Receipts link by `previous_checkpoint_id`.
+Operator-key changes are accepted only through a transition signed by both the
+previous and new key. A witness separately signs the checkpoint id and its own
+`observed_at_ns`.
+
+For offline verification, save the complete history as JSONL and pin the
+genesis operator key and witness key through an independent channel:
+
+```bash
+spine-cli verify-checkpoint \
+  --input checkpoint-history-v2.jsonl --history \
+  --operator-public-key "$SPINE_GENESIS_OPERATOR_PUBKEY" \
+  --witness-id "$SPINE_WITNESS_ID" \
+  --witness-public-key "$SPINE_WITNESS_PUBKEY" \
+  --expected-chain-id primary-eu \
+  --max-age-secs 300
+```
+
+Audit packs require the expected tenant id as independent input; the verifier
+hashes it locally rather than trusting the embedded `tenant_ref`:
+
+```bash
+spine-cli verify-audit-pack \
+  --input tenant-audit-pack.json \
+  --tenant-id tenant-a \
+  --operator-public-key "$SPINE_GENESIS_OPERATOR_PUBKEY" \
+  --witness-id "$SPINE_WITNESS_ID" \
+  --witness-public-key "$SPINE_WITNESS_PUBKEY"
+```
+
+When a witness is pinned, freshness uses the witness-signed observation time.
+Operator time is used only under the explicit `--allow-unwitnessed` downgrade.
 
 ## Live updates
 

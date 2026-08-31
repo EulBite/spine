@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "wal_format_version": 2,
+  "wal_format_version": 3,
   "canonical_json": {
     "cases": [
       {
@@ -422,7 +422,7 @@
       {
         "name": "unsigned_entry_matches_chain_hash",
         "input": {
-          "format_version": 2,
+          "format_version": 3,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -437,7 +437,7 @@
       {
         "name": "signed_entry_invariant_under_sig_and_pubkey",
         "input": {
-          "format_version": 2,
+          "format_version": 3,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -457,7 +457,7 @@
         "name": "three_entry_unsigned_chain",
         "inputs": [
           {
-            "format_version": 2,
+            "format_version": 3,
             "sequence": 1,
             "timestamp_ns": 1700000001000000000,
             "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -468,7 +468,7 @@
             "public_key": null
           },
           {
-            "format_version": 2,
+            "format_version": 3,
             "sequence": 2,
             "timestamp_ns": 1700000002000000000,
             "prev_hash": "066b535b12db25b83cade8b207abf15844388d2998495b0981cb78e49874ad45",
@@ -479,7 +479,7 @@
             "public_key": null
           },
           {
-            "format_version": 2,
+            "format_version": 3,
             "sequence": 3,
             "timestamp_ns": 1700000003000000000,
             "prev_hash": "2094e9e13e64ae53df8191bca2b36c1f429d2179ac08ab22b83308b4daa3f84d",
@@ -539,7 +539,7 @@
         "name": "lenient_no_domain_prefix",
         "profile": "lenient",
         "input": {
-          "format_version": 2,
+          "format_version": 3,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -558,7 +558,7 @@
         "name": "strict_with_spine_wal_v1_prefix",
         "profile": "strict",
         "input": {
-          "format_version": 2,
+          "format_version": 3,
           "sequence": 1,
           "timestamp_ns": 1700000000000000000,
           "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",

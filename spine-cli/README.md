@@ -18,6 +18,13 @@ playground, so a WAL that verifies here verifies there byte-for-byte.
   playground runs, with the signing key pinned from `--trusted-pubkey`,
   `--expected-root` mandatory, and every `payload_hash` recomputed from the
   inline payload's canonical JSON.
+- `verify-checkpoint`: verify one `spine-checkpoint-receipt-v2` JSON envelope,
+  or a complete append-only JSONL history with `--history`. The initial
+  operator key and, by default, a witness key are pinned externally. Trust
+  advances across key rotation only when both old and new keys signed it.
+- `verify-audit-pack`: verify a tenant-scoped `spine-audit-pack-v1`, including
+  its checkpoint proof, witness observations, tenant identity, payload hashes,
+  event ordering and interval commitments.
 - `export`: emit the audit trail as JSON-Lines, CSV, or RFC 5424 syslog.
   JSONL exports written to file are accompanied by a `.manifest.json` that
   pins the chain root (cross-verifiable with `verify`).
@@ -44,6 +51,21 @@ spine-cli verify --wal /path/to/wal --chain-only \
   --checkpoint checkpoint.json \
   --checkpoint-pubkey <64-hex-checkpoint-pubkey> \
   --checkpoint-max-age-secs 300
+
+# Verify the witnessed append-only checkpoint history.
+spine-cli verify-checkpoint \
+  --input checkpoint-history-v2.jsonl --history \
+  --operator-public-key <pinned-genesis-key> \
+  --witness-id customer-witness-eu \
+  --witness-public-key <pinned-witness-key> \
+  --expected-chain-id primary-eu
+
+# Verify a tenant-only evidence bundle without receiving other tenants' data.
+spine-cli verify-audit-pack \
+  --input tenant-audit-pack.json --tenant-id tenant-a \
+  --operator-public-key <pinned-genesis-key> \
+  --witness-id customer-witness-eu \
+  --witness-public-key <pinned-witness-key>
 
 # Show 20 most recent events as a table
 spine-cli inspect --wal /path/to/wal -n 20

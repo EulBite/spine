@@ -41,8 +41,12 @@
 use wasm_bindgen::prelude::*;
 
 use spine_core::{
-    verify_demo_wal, verify_wal_bytes, verify_wal_bytes_with_options, LenientOptions,
+    verify_audit_pack, verify_checkpoint, verify_checkpoint_history, verify_demo_wal,
+    verify_wal_bytes, verify_wal_bytes_with_options, AuditPackPolicy, AuditPackV1,
+    CheckpointReceiptV2, CheckpointTrustPolicy, LenientOptions,
 };
+
+const MAX_WASM_EVIDENCE_JSON_BYTES: usize = 16 * 1024 * 1024;
 
 /// JS-callable strict verifier.
 ///
@@ -101,6 +105,95 @@ pub fn verify_wal_bytes_json(wal_bytes: &[u8], expected_root_hex: Option<String>
         },
     );
     serialize_envelope(&serde_json::to_string(&report))
+}
+
+/// Verify one v2 checkpoint receipt using caller-supplied trust anchors.
+#[must_use]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn verify_checkpoint_v2_json(receipt_json: &str, policy_json: &str) -> String {
+    if let Err(error) = check_evidence_input_sizes(receipt_json, policy_json) {
+        return error_envelope("InputLimitExceeded", &error);
+    }
+    let receipt: CheckpointReceiptV2 = match serde_json::from_str(receipt_json) {
+        Ok(receipt) => receipt,
+        Err(error) => return error_envelope("InvalidCheckpointJson", &error.to_string()),
+    };
+    let policy: CheckpointTrustPolicy = match serde_json::from_str(policy_json) {
+        Ok(policy) => policy,
+        Err(error) => return error_envelope("InvalidTrustPolicyJson", &error.to_string()),
+    };
+    evidence_result(verify_checkpoint(&receipt, &policy))
+}
+
+/// Verify a complete v2 checkpoint history supplied as a JSON array.
+#[must_use]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn verify_checkpoint_history_v2_json(history_json: &str, policy_json: &str) -> String {
+    if let Err(error) = check_evidence_input_sizes(history_json, policy_json) {
+        return error_envelope("InputLimitExceeded", &error);
+    }
+    let history: Vec<CheckpointReceiptV2> = match serde_json::from_str(history_json) {
+        Ok(history) => history,
+        Err(error) => return error_envelope("InvalidCheckpointHistoryJson", &error.to_string()),
+    };
+    let policy: CheckpointTrustPolicy = match serde_json::from_str(policy_json) {
+        Ok(policy) => policy,
+        Err(error) => return error_envelope("InvalidTrustPolicyJson", &error.to_string()),
+    };
+    evidence_result(verify_checkpoint_history(&history, &policy))
+}
+
+/// Verify a tenant-scoped audit pack and its embedded checkpoint proof.
+#[must_use]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn verify_audit_pack_v1_json(pack_json: &str, policy_json: &str) -> String {
+    if let Err(error) = check_evidence_input_sizes(pack_json, policy_json) {
+        return error_envelope("InputLimitExceeded", &error);
+    }
+    let pack: AuditPackV1 = match serde_json::from_str(pack_json) {
+        Ok(pack) => pack,
+        Err(error) => return error_envelope("InvalidAuditPackJson", &error.to_string()),
+    };
+    let policy: AuditPackPolicy = match serde_json::from_str(policy_json) {
+        Ok(policy) => policy,
+        Err(error) => return error_envelope("InvalidAuditPackPolicyJson", &error.to_string()),
+    };
+    evidence_result(verify_audit_pack(&pack, &policy))
+}
+
+fn check_evidence_input_sizes(evidence: &str, policy: &str) -> Result<(), String> {
+    if evidence.len() > MAX_WASM_EVIDENCE_JSON_BYTES {
+        return Err(format!(
+            "evidence JSON exceeds the {MAX_WASM_EVIDENCE_JSON_BYTES} byte browser limit"
+        ));
+    }
+    if policy.len() > 64 * 1024 {
+        return Err("trust policy JSON exceeds the 65536 byte browser limit".into());
+    }
+    Ok(())
+}
+
+fn evidence_result<T: serde::Serialize, E: std::fmt::Display>(result: Result<T, E>) -> String {
+    let value = match result {
+        Ok(report) => serde_json::json!({"ok": true, "valid": true, "report": report}),
+        Err(error) => serde_json::json!({
+            "ok": true,
+            "valid": false,
+            "errors": [error.to_string()]
+        }),
+    };
+    match serde_json::to_string(&value) {
+        Ok(json) => json,
+        Err(error) => error_envelope("ReportSerializationFailed", &error.to_string()),
+    }
+}
+
+fn error_envelope(kind: &str, message: &str) -> String {
+    format!(
+        r#"{{"ok":false,"error":{{"kind":"{}","message":"{}"}}}}"#,
+        escape_json_string(kind),
+        escape_json_string(message)
+    )
 }
 
 fn serialize_envelope(inner: &Result<String, serde_json::Error>) -> String {
@@ -187,5 +280,75 @@ mod tests {
             .unwrap()
             .contains("No expected root")
             || w.as_str().unwrap().contains("No WAL records")));
+    }
+
+    fn evidence_fixture() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../test-vectors/evidence-vectors.json"))
+            .expect("evidence fixture must parse")
+    }
+
+    fn checkpoint_policy(fixture: &serde_json::Value) -> String {
+        serde_json::json!({
+            "initial_operator_public_key": fixture["operator_initial_public_key"],
+            "trusted_witness": {
+                "witness_id": fixture["witness_id"],
+                "public_key": fixture["witness_public_key"]
+            },
+            "allow_unwitnessed": false,
+            "expected_chain_id": "primary-eu",
+            "now_ns": 1_780_000_063_000_000_000_i64,
+            "max_age_secs": 120
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn checkpoint_history_wrapper_accepts_server_fixture() {
+        let fixture = evidence_fixture();
+        let result = verify_checkpoint_history_v2_json(
+            &fixture["checkpoint_history"].to_string(),
+            &checkpoint_policy(&fixture),
+        );
+        let envelope = parse(&result);
+        assert_eq!(envelope["ok"], true);
+        assert_eq!(envelope["valid"], true);
+        assert_eq!(envelope["report"]["checkpoint_count"], 2);
+    }
+
+    #[test]
+    fn audit_pack_wrapper_accepts_server_fixture() {
+        let fixture = evidence_fixture();
+        let policy = serde_json::json!({
+            "expected_tenant_id": "tenant-a",
+            "checkpoint_policy": serde_json::from_str::<serde_json::Value>(
+                &checkpoint_policy(&fixture)
+            )
+            .expect("policy must parse")
+        });
+        let result =
+            verify_audit_pack_v1_json(&fixture["audit_pack"].to_string(), &policy.to_string());
+        let envelope = parse(&result);
+        assert_eq!(envelope["ok"], true);
+        assert_eq!(envelope["valid"], true);
+        assert_eq!(envelope["report"]["tenant_event_count"], 2);
+    }
+
+    #[test]
+    fn evidence_wrapper_separates_parse_errors_from_invalid_proofs() {
+        let malformed = verify_checkpoint_history_v2_json("not-json", "{}");
+        let malformed = parse(&malformed);
+        assert_eq!(malformed["ok"], false);
+
+        let fixture = evidence_fixture();
+        let mut policy: serde_json::Value =
+            serde_json::from_str(&checkpoint_policy(&fixture)).expect("policy must parse");
+        policy["initial_operator_public_key"] = serde_json::Value::String("00".repeat(32));
+        let invalid = verify_checkpoint_history_v2_json(
+            &fixture["checkpoint_history"].to_string(),
+            &policy.to_string(),
+        );
+        let invalid = parse(&invalid);
+        assert_eq!(invalid["ok"], true);
+        assert_eq!(invalid["valid"], false);
     }
 }

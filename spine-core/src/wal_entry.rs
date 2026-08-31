@@ -99,9 +99,13 @@
 //!       `event_id`, `stream_id` added as hashed fields 9 through 12 so
 //!       every field the strict verifier accepts is committed and cannot
 //!       be edited without breaking the chain (2026-06).
+//!   3 - Same injective entry framing as version 2. New producers additionally
+//!       compute `payload_hash` from the public canonical JSON contract;
+//!       see [`compute_payload_hash_for_version`] (2026-08).
 
 use blake3::Hasher;
 use serde::{Deserialize, Deserializer, Serialize};
+use thiserror::Error;
 
 use crate::receipt::Receipt;
 
@@ -112,13 +116,38 @@ pub const GENESIS_PREV_HASH: &str =
 /// Current WAL format version that new producers should emit. Bump on
 /// any breaking change to the entry hash contract or to the WalEntry
 /// struct shape.
-pub const WAL_FORMAT_VERSION: u32 = 2;
+pub const WAL_FORMAT_VERSION: u32 = 3;
 
 /// Every format version this build can verify. A WAL entry is hashed
 /// with the encoding that matches its own `format_version`, so older
 /// files keep verifying after a bump. Listed newest-first only for
 /// readability; membership is what matters.
-pub const SUPPORTED_WAL_FORMAT_VERSIONS: &[u32] = &[2, 1];
+pub const SUPPORTED_WAL_FORMAT_VERSIONS: &[u32] = &[3, 2, 1];
+
+#[derive(Debug, Error)]
+pub enum PayloadHashError {
+    #[error("legacy payload JSON serialization failed: {0}")]
+    LegacyJson(#[from] serde_json::Error),
+    #[error("canonical payload JSON failed: {0}")]
+    Canonical(#[from] crate::CanonicalError),
+}
+
+/// Reproduce the payload commitment emitted by a production WAL writer.
+///
+/// Versions 1 and 2 retain the historical compact-serde representation.
+/// Version 3 and later use [`crate::canonical_json`], making the producer,
+/// native verifier and browser verifier share one cross-language contract.
+pub fn compute_payload_hash_for_version(
+    payload: &serde_json::Value,
+    format_version: u32,
+) -> Result<String, PayloadHashError> {
+    let bytes = if format_version >= 3 {
+        crate::canonical_json(payload)?
+    } else {
+        serde_json::to_vec(payload)?
+    };
+    Ok(hex::encode(blake3::hash(&bytes).as_bytes()))
+}
 
 /// Whether this build can verify entries of the given format version.
 #[inline]
@@ -1042,11 +1071,27 @@ mod tests {
     }
 
     #[test]
-    fn supported_versions_cover_one_and_two() {
+    fn version_3_payload_hash_uses_public_canonical_json_and_legacy_is_preserved() {
+        let payload = serde_json::json!({"cafe\u{301}": 1, "key": "cafe\u{301}"});
+        let current = compute_payload_hash_for_version(&payload, 3).unwrap();
+        assert_eq!(
+            current,
+            "c5491df8d758b908dcd81942c10f7a88d1c9548d8350afb487b78dcaa8ea7306"
+        );
+        let legacy = compute_payload_hash_for_version(&payload, 2).unwrap();
+        assert_ne!(
+            legacy, current,
+            "legacy payload bytes must remain versioned"
+        );
+    }
+
+    #[test]
+    fn supported_versions_cover_one_through_three() {
         assert!(is_supported_format_version(1));
         assert!(is_supported_format_version(2));
+        assert!(is_supported_format_version(3));
         assert!(!is_supported_format_version(0));
-        assert!(!is_supported_format_version(3));
+        assert!(!is_supported_format_version(4));
     }
 
     #[test]

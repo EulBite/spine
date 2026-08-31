@@ -220,6 +220,109 @@ fn unknown_subcommand_is_a_usage_error() {
     assert_eq!(code(&out), 2);
 }
 
+fn evidence_fixture(name: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("test-vectors")
+        .join(name)
+}
+
+fn evidence_metadata() -> Value {
+    serde_json::from_str(include_str!("../../test-vectors/evidence-vectors.json"))
+        .expect("evidence fixture must parse")
+}
+
+#[test]
+fn verify_checkpoint_history_accepts_server_generated_fixture() {
+    let metadata = evidence_metadata();
+    let input = evidence_fixture("checkpoint-history-v2.jsonl");
+    let out = run(&[
+        "--format",
+        "json",
+        "verify-checkpoint",
+        "--input",
+        path_str(&input),
+        "--history",
+        "--operator-public-key",
+        metadata["operator_initial_public_key"].as_str().unwrap(),
+        "--witness-id",
+        metadata["witness_id"].as_str().unwrap(),
+        "--witness-public-key",
+        metadata["witness_public_key"].as_str().unwrap(),
+        "--expected-chain-id",
+        "primary-eu",
+    ]);
+    assert_eq!(code(&out), 0, "{}", String::from_utf8_lossy(&out.stderr));
+    let report: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["report"]["checkpoint_count"], 2);
+    assert_eq!(report["report"]["trusted_witness_observations"], 2);
+}
+
+#[test]
+fn verify_audit_pack_accepts_server_generated_fixture() {
+    let metadata = evidence_metadata();
+    let input = evidence_fixture("audit-pack-v1.json");
+    let out = run(&[
+        "--format",
+        "json",
+        "verify-audit-pack",
+        "--input",
+        path_str(&input),
+        "--tenant-id",
+        "tenant-a",
+        "--operator-public-key",
+        metadata["operator_initial_public_key"].as_str().unwrap(),
+        "--witness-id",
+        metadata["witness_id"].as_str().unwrap(),
+        "--witness-public-key",
+        metadata["witness_public_key"].as_str().unwrap(),
+        "--expected-chain-id",
+        "primary-eu",
+    ]);
+    assert_eq!(code(&out), 0, "{}", String::from_utf8_lossy(&out.stderr));
+    let report: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["report"]["tenant_event_count"], 2);
+}
+
+#[test]
+fn evidence_commands_require_a_witness_or_explicit_override() {
+    let metadata = evidence_metadata();
+    let input = evidence_fixture("checkpoint-history-v2.jsonl");
+    let out = run(&[
+        "verify-checkpoint",
+        "--input",
+        path_str(&input),
+        "--history",
+        "--operator-public-key",
+        metadata["operator_initial_public_key"].as_str().unwrap(),
+    ]);
+    assert_eq!(code(&out), 2);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("pinned witness"));
+}
+
+#[test]
+fn verify_audit_pack_rejects_wrong_expected_tenant() {
+    let metadata = evidence_metadata();
+    let input = evidence_fixture("audit-pack-v1.json");
+    let out = run(&[
+        "--format",
+        "json",
+        "verify-audit-pack",
+        "--input",
+        path_str(&input),
+        "--tenant-id",
+        "tenant-b",
+        "--operator-public-key",
+        metadata["operator_initial_public_key"].as_str().unwrap(),
+        "--allow-unwitnessed",
+    ]);
+    assert_eq!(code(&out), 1);
+    let report: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(report["valid"], false);
+}
+
 #[test]
 fn verify_missing_directory_exits_two() {
     let out = run(&["verify", "--wal", "this/path/does/not/exist"]);

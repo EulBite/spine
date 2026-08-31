@@ -1,0 +1,287 @@
+{
+  "schema_version": 1,
+  "operator_initial_public_key": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd",
+  "operator_rotated_public_key": "5e212c0980e4b39fc09721134aa02109374edfd260c0d3d03cb501c8d65457a9",
+  "witness_id": "customer-witness-eu",
+  "witness_public_key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+  "tenant_id": "tenant-a",
+  "checkpoint_history": [
+    {
+      "core": {
+        "schema": "spine-checkpoint-receipt-v2",
+        "chain_id": "primary-eu",
+        "chain_root": "9ac9b4d6f0585ddf0b68602e0ed4b8179666c61030f96c5ac8c334d3c983fd5d",
+        "total_event_count": 2,
+        "last_sequence": 2,
+        "interval_start_sequence": 1,
+        "interval_end_sequence": 2,
+        "created_at_ns": 1780000000000000000,
+        "previous_checkpoint_id": null,
+        "operator_key_id": "ed25519:bfc9eb2e5ad1a8d6cda6ab65d3528da9",
+        "operator_algorithm": "ed25519",
+        "tenant_commitments": [
+          {
+            "tenant_ref": "7b893fe4a43e7255bfedfe888e581ade6e5f4236b5e0ab201c8e141f3f049258",
+            "event_count": 1,
+            "first_sequence": 2,
+            "last_sequence": 2,
+            "events_root": "a10b8fbb17ba5d694923386d8679471135ceff3f52f34b00774b145ed5e90b25"
+          },
+          {
+            "tenant_ref": "db054843664cd65fe3475f88ddbc4199d07590fd3ac63eff2a0aba5ff9d472f4",
+            "event_count": 1,
+            "first_sequence": 1,
+            "last_sequence": 1,
+            "events_root": "e6f3035414caf06bc979cb6eb48a1547d5740b62576bbd0c10e4ad18df146568"
+          }
+        ]
+      },
+      "checkpoint_id": "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+      "operator_signature": {
+        "public_key": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd",
+        "signature": "e1bf540f83da9265be830ac691c55d7789dde66fd738dddc3bd663712a762a252b69be68e6ee5976248477536670c68f2a0ac8b5a7c8366f6925fbb9085ffb0d"
+      },
+      "witnesses": [
+        {
+          "schema": "spine-witness-receipt-v1",
+          "witness_id": "customer-witness-eu",
+          "checkpoint_id": "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+          "observed_at_ns": 1780000001000000000,
+          "algorithm": "ed25519",
+          "public_key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+          "signature": "996c9d748e9a4f3d769246f76adb434863b0538a9521babdc0a5937a4239e920f05b21d71c0a063535d3c418a5e2f16e9e01ab215334af67e8b9651b0e332a0b"
+        }
+      ]
+    },
+    {
+      "core": {
+        "schema": "spine-checkpoint-receipt-v2",
+        "chain_id": "primary-eu",
+        "chain_root": "dcea421a403d11d5f6063d3f1ff86acf04884d2adc92a32242521328f17f9158",
+        "total_event_count": 3,
+        "last_sequence": 3,
+        "interval_start_sequence": 3,
+        "interval_end_sequence": 3,
+        "created_at_ns": 1780000060000000000,
+        "previous_checkpoint_id": "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+        "operator_key_id": "ed25519:65060cafdadac9980f84c8e02d232385",
+        "operator_algorithm": "ed25519",
+        "key_transition": {
+          "schema": "spine-operator-key-transition-v1",
+          "previous_key_id": "ed25519:bfc9eb2e5ad1a8d6cda6ab65d3528da9",
+          "previous_public_key": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd",
+          "new_key_id": "ed25519:65060cafdadac9980f84c8e02d232385",
+          "new_public_key": "5e212c0980e4b39fc09721134aa02109374edfd260c0d3d03cb501c8d65457a9",
+          "rotated_at_ns": 1780000059000000000,
+          "reason": "scheduled-rotation",
+          "previous_key_signature": "1f0c58635806788c773acb086291a3d36e0b34b24c1529075a833f37c17444311c1d9b986da42b98d8380b5956c033824a07897ae5604dd2badea324fb9efe09",
+          "new_key_signature": "7adcb190823b3cd50c79ef29dd8b88087e7e3a31e837c8a2e9f9d3f5dcc88a058d2d836553667d0bbe18476c00932cf5635b440aade5e591aa5e69df82febf07"
+        },
+        "tenant_commitments": [
+          {
+            "tenant_ref": "db054843664cd65fe3475f88ddbc4199d07590fd3ac63eff2a0aba5ff9d472f4",
+            "event_count": 1,
+            "first_sequence": 3,
+            "last_sequence": 3,
+            "events_root": "ea4a56b9e27ff180e9f1d4abb7c07db618c8a493dee8025a886f31de5b207f3c"
+          }
+        ]
+      },
+      "checkpoint_id": "b0571e64459b6a893168db01fc86df1de34031655ab593615d7f480e3f2ed572",
+      "operator_signature": {
+        "public_key": "5e212c0980e4b39fc09721134aa02109374edfd260c0d3d03cb501c8d65457a9",
+        "signature": "913b6dfc119623136de42c0d00cc8f0ceb68ea9fc03a16852b61fe3c2235e4146f4def872ec0e5c20183ff1e0db5b53a93b108a58db6f908a6127e6f77d62304"
+      },
+      "witnesses": [
+        {
+          "schema": "spine-witness-receipt-v1",
+          "witness_id": "customer-witness-eu",
+          "checkpoint_id": "b0571e64459b6a893168db01fc86df1de34031655ab593615d7f480e3f2ed572",
+          "observed_at_ns": 1780000061000000000,
+          "algorithm": "ed25519",
+          "public_key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+          "signature": "863394895d2f3dc45cb6bef17041a6a7c81306e8206b4b4199f412b05c50ad78fb851a589baf7891aa853630aed623c743263c3d0db8610a5f416eb3cf27bd06"
+        }
+      ]
+    }
+  ],
+  "audit_pack": {
+    "core": {
+      "schema": "spine-audit-pack-v1",
+      "tenant_ref": "db054843664cd65fe3475f88ddbc4199d07590fd3ac63eff2a0aba5ff9d472f4",
+      "chain_id": "primary-eu",
+      "generated_at_ns": 1780000062000000000,
+      "first_checkpoint_id": "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+      "last_checkpoint_id": "b0571e64459b6a893168db01fc86df1de34031655ab593615d7f480e3f2ed572",
+      "checkpoint_ids": [
+        "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+        "b0571e64459b6a893168db01fc86df1de34031655ab593615d7f480e3f2ed572"
+      ],
+      "covered_start_sequence": 1,
+      "covered_end_sequence": 3,
+      "tenant_event_count": 2,
+      "tenant_events_root": "035e011046a7d850e33d9db3ce87b278de38722348191725000e45a7b83ba82d",
+      "operator_key_id": "ed25519:65060cafdadac9980f84c8e02d232385",
+      "operator_algorithm": "ed25519"
+    },
+    "pack_id": "49d2e7c7760f75d71e1c666d1652dded0398475bc5ddc7b951d8fd4915849740",
+    "checkpoints": [
+      {
+        "core": {
+          "schema": "spine-checkpoint-receipt-v2",
+          "chain_id": "primary-eu",
+          "chain_root": "9ac9b4d6f0585ddf0b68602e0ed4b8179666c61030f96c5ac8c334d3c983fd5d",
+          "total_event_count": 2,
+          "last_sequence": 2,
+          "interval_start_sequence": 1,
+          "interval_end_sequence": 2,
+          "created_at_ns": 1780000000000000000,
+          "previous_checkpoint_id": null,
+          "operator_key_id": "ed25519:bfc9eb2e5ad1a8d6cda6ab65d3528da9",
+          "operator_algorithm": "ed25519",
+          "tenant_commitments": [
+            {
+              "tenant_ref": "7b893fe4a43e7255bfedfe888e581ade6e5f4236b5e0ab201c8e141f3f049258",
+              "event_count": 1,
+              "first_sequence": 2,
+              "last_sequence": 2,
+              "events_root": "a10b8fbb17ba5d694923386d8679471135ceff3f52f34b00774b145ed5e90b25"
+            },
+            {
+              "tenant_ref": "db054843664cd65fe3475f88ddbc4199d07590fd3ac63eff2a0aba5ff9d472f4",
+              "event_count": 1,
+              "first_sequence": 1,
+              "last_sequence": 1,
+              "events_root": "e6f3035414caf06bc979cb6eb48a1547d5740b62576bbd0c10e4ad18df146568"
+            }
+          ]
+        },
+        "checkpoint_id": "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+        "operator_signature": {
+          "public_key": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd",
+          "signature": "e1bf540f83da9265be830ac691c55d7789dde66fd738dddc3bd663712a762a252b69be68e6ee5976248477536670c68f2a0ac8b5a7c8366f6925fbb9085ffb0d"
+        },
+        "witnesses": [
+          {
+            "schema": "spine-witness-receipt-v1",
+            "witness_id": "customer-witness-eu",
+            "checkpoint_id": "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+            "observed_at_ns": 1780000001000000000,
+            "algorithm": "ed25519",
+            "public_key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+            "signature": "996c9d748e9a4f3d769246f76adb434863b0538a9521babdc0a5937a4239e920f05b21d71c0a063535d3c418a5e2f16e9e01ab215334af67e8b9651b0e332a0b"
+          }
+        ]
+      },
+      {
+        "core": {
+          "schema": "spine-checkpoint-receipt-v2",
+          "chain_id": "primary-eu",
+          "chain_root": "dcea421a403d11d5f6063d3f1ff86acf04884d2adc92a32242521328f17f9158",
+          "total_event_count": 3,
+          "last_sequence": 3,
+          "interval_start_sequence": 3,
+          "interval_end_sequence": 3,
+          "created_at_ns": 1780000060000000000,
+          "previous_checkpoint_id": "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+          "operator_key_id": "ed25519:65060cafdadac9980f84c8e02d232385",
+          "operator_algorithm": "ed25519",
+          "key_transition": {
+            "schema": "spine-operator-key-transition-v1",
+            "previous_key_id": "ed25519:bfc9eb2e5ad1a8d6cda6ab65d3528da9",
+            "previous_public_key": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd",
+            "new_key_id": "ed25519:65060cafdadac9980f84c8e02d232385",
+            "new_public_key": "5e212c0980e4b39fc09721134aa02109374edfd260c0d3d03cb501c8d65457a9",
+            "rotated_at_ns": 1780000059000000000,
+            "reason": "scheduled-rotation",
+            "previous_key_signature": "1f0c58635806788c773acb086291a3d36e0b34b24c1529075a833f37c17444311c1d9b986da42b98d8380b5956c033824a07897ae5604dd2badea324fb9efe09",
+            "new_key_signature": "7adcb190823b3cd50c79ef29dd8b88087e7e3a31e837c8a2e9f9d3f5dcc88a058d2d836553667d0bbe18476c00932cf5635b440aade5e591aa5e69df82febf07"
+          },
+          "tenant_commitments": [
+            {
+              "tenant_ref": "db054843664cd65fe3475f88ddbc4199d07590fd3ac63eff2a0aba5ff9d472f4",
+              "event_count": 1,
+              "first_sequence": 3,
+              "last_sequence": 3,
+              "events_root": "ea4a56b9e27ff180e9f1d4abb7c07db618c8a493dee8025a886f31de5b207f3c"
+            }
+          ]
+        },
+        "checkpoint_id": "b0571e64459b6a893168db01fc86df1de34031655ab593615d7f480e3f2ed572",
+        "operator_signature": {
+          "public_key": "5e212c0980e4b39fc09721134aa02109374edfd260c0d3d03cb501c8d65457a9",
+          "signature": "913b6dfc119623136de42c0d00cc8f0ceb68ea9fc03a16852b61fe3c2235e4146f4def872ec0e5c20183ff1e0db5b53a93b108a58db6f908a6127e6f77d62304"
+        },
+        "witnesses": [
+          {
+            "schema": "spine-witness-receipt-v1",
+            "witness_id": "customer-witness-eu",
+            "checkpoint_id": "b0571e64459b6a893168db01fc86df1de34031655ab593615d7f480e3f2ed572",
+            "observed_at_ns": 1780000061000000000,
+            "algorithm": "ed25519",
+            "public_key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+            "signature": "863394895d2f3dc45cb6bef17041a6a7c81306e8206b4b4199f412b05c50ad78fb851a589baf7891aa853630aed623c743263c3d0db8610a5f416eb3cf27bd06"
+          }
+        ]
+      }
+    ],
+    "intervals": [
+      {
+        "checkpoint_id": "c0c8024ef17819cc5cff66b533265892f5799dd679759c4c01fc4ab43da38fb5",
+        "interval_start_sequence": 1,
+        "interval_end_sequence": 2,
+        "events": [
+          {
+            "format_version": 3,
+            "sequence": 1,
+            "timestamp_ns": 1780000000000000001,
+            "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "payload_hash": "4864feb47b47d34ba1a178c3844f19303035961aaa38a419a68b33c633053faa",
+            "payload": {
+              "spine_auth": {
+                "authenticated": true,
+                "key_id": "fixture-key",
+                "tenant_id": "tenant-a"
+              },
+              "text": "café",
+              "value": 1
+            },
+            "event_type": "fixture.event",
+            "source": "evidence-vector",
+            "severity": "info"
+          }
+        ]
+      },
+      {
+        "checkpoint_id": "b0571e64459b6a893168db01fc86df1de34031655ab593615d7f480e3f2ed572",
+        "interval_start_sequence": 3,
+        "interval_end_sequence": 3,
+        "events": [
+          {
+            "format_version": 3,
+            "sequence": 3,
+            "timestamp_ns": 1780000000000000003,
+            "prev_hash": "ef89fdb5a1bb29e020602fe7c42ced3e3585bb00dd4ec651c62fa50cbfeb915d",
+            "payload_hash": "89c1420b903155c3937842142c9ec7ee00b5100cd18d32e568e66fba9dd466f3",
+            "payload": {
+              "spine_auth": {
+                "authenticated": true,
+                "key_id": "fixture-key",
+                "tenant_id": "tenant-a"
+              },
+              "text": "café",
+              "value": 3
+            },
+            "event_type": "fixture.event",
+            "source": "evidence-vector",
+            "severity": "info"
+          }
+        ]
+      }
+    ],
+    "operator_signature": {
+      "public_key": "5e212c0980e4b39fc09721134aa02109374edfd260c0d3d03cb501c8d65457a9",
+      "signature": "5c898e309653ca43fd7ca764f74a950b273b297ba20deda8bb44c7bc71f10e5f8dd1aa5d9677d9a4c30f7ce8b7da8c438f143a02c1e5b40ae1c6a0fa3fe8bf0c"
+    }
+  }
+}

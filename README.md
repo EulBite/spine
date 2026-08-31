@@ -34,7 +34,7 @@ deployment.
 spine-core/        Pure verification library: hash chain, signature verify,
                    canonical JSON. No filesystem, no network, no signing,
                    just pure logic suitable for native and wasm targets alike.
-spine-cli/         Standalone CLI for offline WAL verification.
+spine-cli/         Standalone CLI for offline WAL and evidence verification.
 spine-wasm/        wasm-bindgen façade over spine-core for browser use.
 test-vectors/      Language-independent reference vectors pinning canonical
                    JSON, hashing, and the signature contracts. The Rust crates
@@ -76,6 +76,34 @@ spine-cli verify --wal /path/to/wal \
 See [private server interoperability](docs/server-interoperability.md) for the
 current REST calls, trust model, and the distinction between production and
 playground verification profiles.
+
+## Verifying witnessed evidence
+
+Checkpoint receipt v2 adds an append-only checkpoint history, tenant interval
+commitments, cross-signed operator-key rotation and independently pinned
+witness observations. Verify a complete history from its genesis key:
+
+```bash
+spine-cli verify-checkpoint \
+  --input checkpoint-history-v2.jsonl --history \
+  --operator-public-key <pinned-genesis-key> \
+  --witness-id customer-witness-eu \
+  --witness-public-key <pinned-witness-key> \
+  --expected-chain-id primary-eu
+```
+
+Tenant audit packs carry that proof prefix plus only the tenant's events:
+
+```bash
+spine-cli verify-audit-pack \
+  --input audit-pack-v1.json --tenant-id tenant-a \
+  --operator-public-key <pinned-genesis-key> \
+  --witness-id customer-witness-eu \
+  --witness-public-key <pinned-witness-key>
+```
+
+The embedded keys never authenticate themselves. `--allow-unwitnessed` is an
+explicit downgrade to operator-only evidence and is never the default.
 
 ## What this verifies, and what it does not
 

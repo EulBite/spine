@@ -1,6 +1,6 @@
 [package]
 name = "spine-cli"
-description = "Standalone offline auditor for Spine WAL files. Verifies BLAKE3 hash chains and Ed25519 signatures without trusting any server."
+description = "Standalone offline auditor for Spine WAL files, witnessed checkpoint histories and tenant audit packs."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

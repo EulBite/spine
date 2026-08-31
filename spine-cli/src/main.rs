@@ -3,7 +3,7 @@
 
 //! Spine CLI: standalone offline auditor for Spine WAL files.
 //!
-//! Three subcommands:
+//! Five subcommands:
 //!
 //! * `verify`: lenient verification of a WAL directory against
 //!   `spine-core`. Optional `--keystore` enables receipt-signature
@@ -51,6 +51,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
+mod evidence;
 mod export;
 mod inspect;
 mod verify;
@@ -78,6 +79,72 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Verify a v2 checkpoint receipt or its append-only JSONL history.
+    VerifyCheckpoint {
+        /// Checkpoint receipt JSON, or JSONL history with --history.
+        #[arg(short, long, value_name = "FILE")]
+        input: PathBuf,
+
+        /// Treat input as the complete checkpoint history from genesis.
+        #[arg(long)]
+        history: bool,
+
+        /// Externally pinned initial operator Ed25519 public key.
+        #[arg(long, value_name = "64-HEX-PUBKEY")]
+        operator_public_key: String,
+
+        /// Independently trusted witness identifier.
+        #[arg(long, requires = "witness_public_key")]
+        witness_id: Option<String>,
+
+        /// Independently pinned witness Ed25519 public key.
+        #[arg(long, requires = "witness_id", value_name = "64-HEX-PUBKEY")]
+        witness_public_key: Option<String>,
+
+        /// Explicitly accept operator-only evidence without a witness.
+        #[arg(long)]
+        allow_unwitnessed: bool,
+
+        /// Require this deployment chain identifier.
+        #[arg(long)]
+        expected_chain_id: Option<String>,
+
+        /// Reject evidence whose trusted observation is older than this.
+        #[arg(long, value_name = "SECONDS")]
+        max_age_secs: Option<u64>,
+    },
+
+    /// Verify a tenant audit pack and its embedded checkpoint proof.
+    VerifyAuditPack {
+        /// Signed audit pack JSON.
+        #[arg(short, long, value_name = "FILE")]
+        input: PathBuf,
+
+        /// Expected tenant id, hashed locally before comparison.
+        #[arg(long)]
+        tenant_id: String,
+
+        /// Externally pinned genesis operator Ed25519 public key.
+        #[arg(long, value_name = "64-HEX-PUBKEY")]
+        operator_public_key: String,
+
+        #[arg(long, requires = "witness_public_key")]
+        witness_id: Option<String>,
+
+        #[arg(long, requires = "witness_id", value_name = "64-HEX-PUBKEY")]
+        witness_public_key: Option<String>,
+
+        /// Explicitly accept operator-only evidence without a witness.
+        #[arg(long)]
+        allow_unwitnessed: bool,
+
+        #[arg(long)]
+        expected_chain_id: Option<String>,
+
+        #[arg(long, value_name = "SECONDS")]
+        max_age_secs: Option<u64>,
+    },
+
     /// Verify integrity of a WAL directory using the lenient profile.
     Verify {
         /// Path to WAL directory.
@@ -267,6 +334,48 @@ fn main() -> ExitCode {
         .try_init();
 
     let outcome: Result<bool, String> = match cli.command {
+        Commands::VerifyCheckpoint {
+            input,
+            history,
+            operator_public_key,
+            witness_id,
+            witness_public_key,
+            allow_unwitnessed,
+            expected_chain_id,
+            max_age_secs,
+        } => evidence::run_checkpoint(
+            &input,
+            history,
+            &operator_public_key,
+            witness_id.as_deref(),
+            witness_public_key.as_deref(),
+            allow_unwitnessed,
+            expected_chain_id.as_deref(),
+            max_age_secs,
+            cli.format,
+        ),
+
+        Commands::VerifyAuditPack {
+            input,
+            tenant_id,
+            operator_public_key,
+            witness_id,
+            witness_public_key,
+            allow_unwitnessed,
+            expected_chain_id,
+            max_age_secs,
+        } => evidence::run_audit_pack(
+            &input,
+            &tenant_id,
+            &operator_public_key,
+            witness_id.as_deref(),
+            witness_public_key.as_deref(),
+            allow_unwitnessed,
+            expected_chain_id.as_deref(),
+            max_age_secs,
+            cli.format,
+        ),
+
         Commands::Verify {
             wal,
             expected_root,

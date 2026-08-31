@@ -43,9 +43,13 @@ The following components, when used as documented:
     where the verifier does not reproduce a pinned canonical-JSON,
     entry-hash, or signature value. The vectors are the wire
     contract; a divergence is a correctness bug.
+  - Checkpoint-v2 history soundness: external operator pinning, append-only
+    links, cross-signed key rotation, witness pinning and freshness.
+  - Tenant audit-pack completeness against signed interval commitments and
+    the server-generated evidence interoperability fixtures.
 - **`spine-wasm`**: the WebAssembly façade.
-  - The JS-callable surface (`verify_demo_wal_json`,
-    `verify_wal_bytes_json`) and its JSON envelope.
+  - The JS-callable WAL, checkpoint-history and audit-pack surfaces and their
+    JSON envelopes.
   - Bundle-integrity issues that survive the documented bootstrap
     (manifest-pinned hashes, Blob-URL dynamic import).
 - **`spine-cli`**: the offline auditor binary.
@@ -73,8 +77,8 @@ These are **not** security issues against this repository:
   pipeline is the deploying site's responsibility. See
   `playground-spec/INTEGRATION.md` § 7 for the documented
   requirements.
-- Key-management, HSM integration, key rotation, or multi-signer
-  flows. None of that lives here.
+- Operational key custody and HSM integration. Verification of the published
+  cross-signed operator-key rotation contract is in scope.
 - Compliance certifications.
 - Misuse of the lenient `verify_wal_bytes` in a context that
   required pinning. The default lenient entry point is policy-free

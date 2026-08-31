@@ -33,17 +33,35 @@
 #![deny(clippy::expect_used)]
 #![forbid(unsafe_code)]
 
+pub mod audit_pack;
 pub mod canonical;
 pub mod checkpoint;
+pub mod checkpoint_v2;
 pub mod receipt;
 pub mod verify;
 pub mod verify_demo;
 pub mod wal_entry;
 
+pub use audit_pack::{
+    audit_pack_id, audit_pack_message, verify_audit_pack, AuditPackCoreV1, AuditPackError,
+    AuditPackIntervalV1, AuditPackPolicy, AuditPackReport, AuditPackSignatureV1, AuditPackV1,
+    AUDIT_PACK_DOMAIN_V1, AUDIT_PACK_ID_DOMAIN_V1, AUDIT_PACK_SCHEMA_V1,
+};
 pub use canonical::{canonical_json, canonical_json_from_bytes, CanonicalError};
 pub use checkpoint::{
     public_checkpoint_message, verify_public_checkpoint, CheckpointError, PublicCheckpoint,
     CHECKPOINT_DOMAIN_SEP, CHECKPOINT_SCHEMA,
+};
+pub use checkpoint_v2::{
+    checkpoint_core_message, checkpoint_id, key_transition_message, operator_key_id, tenant_ref,
+    verify_checkpoint, verify_checkpoint_history, verify_checkpoint_receipt,
+    verify_operator_key_transition, witness_receipt_message, CheckpointCoreV2,
+    CheckpointHistoryReport, CheckpointReceiptV2, CheckpointTrustPolicy, CheckpointV2Error,
+    OperatorKeyTransitionV1, OperatorSignatureV2, TenantIntervalCommitment, TrustedWitness,
+    WitnessReceiptV1, CHECKPOINT_CORE_DOMAIN_V2, CHECKPOINT_ID_DOMAIN_V2,
+    CHECKPOINT_RECEIPT_SCHEMA_V2, KEY_TRANSITION_DOMAIN_V1, KEY_TRANSITION_SCHEMA_V1,
+    OPERATOR_KEY_ID_DOMAIN_V1, TENANT_REF_DOMAIN_V1, WITNESS_RECEIPT_DOMAIN_V1,
+    WITNESS_RECEIPT_SCHEMA_V1,
 };
 pub use receipt::{
     receipt_canonical_message, verify_receipt_against_keystore, verify_receipt_signature, Keystore,
@@ -60,9 +78,9 @@ pub use verify_demo::{
 pub use wal_entry::{
     compute_chain_root, compute_chain_root_from_entries, compute_entry_hash,
     compute_entry_hash_for_signing, compute_entry_hash_for_signing_raw, compute_entry_hash_raw,
-    is_supported_format_version, validate_entry_hashes, validate_hex_hash, verify_chain_link,
-    HashVerification, HexValidation, WalEntry, GENESIS_PREV_HASH, SUPPORTED_WAL_FORMAT_VERSIONS,
-    WAL_FORMAT_VERSION,
+    compute_payload_hash_for_version, is_supported_format_version, validate_entry_hashes,
+    validate_hex_hash, verify_chain_link, HashVerification, HexValidation, PayloadHashError,
+    WalEntry, GENESIS_PREV_HASH, SUPPORTED_WAL_FORMAT_VERSIONS, WAL_FORMAT_VERSION,
 };
 
 /// Crate version, surfaced in [`DemoReport::verifier_version`] so a
