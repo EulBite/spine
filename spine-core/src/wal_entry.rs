@@ -674,7 +674,7 @@ pub fn verify_chain_link(current: &WalEntry, previous: Option<&WalEntry>) -> Has
                     reason: format!(
                         "genesis prev_hash must be {}, found {}",
                         &GENESIS_PREV_HASH[..16],
-                        &current.prev_hash
+                        current.prev_hash
                     ),
                 };
             }
