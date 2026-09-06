@@ -69,6 +69,19 @@ jobs:
       - name: cargo test (workspace, locked)
         run: cargo test --locked --workspace --all-features
 
+  workspace-required:
+    # Preserve the protected branch's required check name while requiring
+    # both the MSRV and current-stable matrix jobs to succeed.
+    name: cargo test (workspace)
+    runs-on: ubuntu-latest
+    needs: test
+    if: ${{ always() }}
+    steps:
+      - name: Require every Rust toolchain check
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+        run: test "$TEST_RESULT" = success
+
   wasm-build:
     name: wasm-pack build (verifier bundle)
     runs-on: ubuntu-latest
