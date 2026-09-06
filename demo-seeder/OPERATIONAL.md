@@ -16,7 +16,7 @@ next to this file; everything it does is documented in `src/main.rs` and
 
 ## What the binary produces
 
-Four files in `--output-dir` (default: current directory):
+Four files in `--output-dir` (default: `out`):
 
 - `demo.jsonl`: the signed WAL (one JSONL record per line, 20 records).
 - `demo.pubkey`: 64-char lowercase hex of the Ed25519 verifying key.
@@ -40,33 +40,31 @@ Run these on the regular development machine, **before** going airgapped:
 
    ```sh
    cd demo-seeder
-   cargo build --release
+   cargo build --locked --release
    ./target/release/demo-seeder --deterministic-seed 42 --non-interactive --output-dir out-test
    ```
 
    The run ends with `Generated 20 records (test fixture, seed exposed
    in source).`, the four output paths, and `Chain root:
-   c36bd135f17fbd48…`. That `chain_root` is reproducible across runs of
-   the same seed; if it ever drifts, something in `spine-core` changed
-   and the cross-language parity needs re-validating.
+   6cdaaaaaad59b3d5…`. The seed-42 public key and root are pinned in a
+   seeder regression test, including across random-number library updates.
+   A drift requires investigation and cross-language parity validation.
 
 2. Cross-check the test fixture with `spine-cli verify`:
 
    ```sh
    cd ../
-   cargo build --release -p spine-cli
+   cargo build --locked --release -p spine-cli
    ./target/release/spine-cli --format json verify --wal demo-seeder/out-test/ \
-     | grep -E 'chain_root|events_verified|valid'
+     --strict \
+     --trusted-pubkey "$(cat demo-seeder/out-test/demo.pubkey)" \
+     --expected-root "$(cat demo-seeder/out-test/demo.expected_root)"
    ```
 
-   Expected output: `valid: false`, `events_verified: 20`,
-   `chain_root: c36bd135…`. The `valid: false` is **correct**: the
-   lenient verifier (used by `spine-cli`) and the strict verifier
-   (used by the playground) sign over different messages by design.
-   See the cross-API doc-comments in `verify.rs` and
-   `verify_demo.rs`. The matching `chain_root` is the parity
-   guarantee that this fixture and a live playground run see the
-   same chain.
+   Expected output: `status: "valid"`, `events_verified: 20`,
+   `chain_root: 6cdaaaaaad59b3d5…`, and exit code zero. `--strict`
+   selects the same signature profile as the playground; omitting it
+   selects the server WAL profile, which cannot authenticate this demo.
 
 3. Wipe the test fixture so it does not contaminate the airgapped run:
 

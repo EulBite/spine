@@ -30,6 +30,11 @@ deployment.
 
 ## Layout
 
+Building the verifier crates requires Rust 1.88.0 or later. CI tests the
+committed dependency lockfile on Rust 1.88.0 and the current stable release;
+the WebAssembly integration tests use Node.js 24. Use `--locked` when
+building or testing either the workspace or the separate demo seeder.
+
 ```
 spine-core/        Pure verification library: hash chain, signature verify,
                    canonical JSON. No filesystem, no network, no signing,
@@ -43,7 +48,7 @@ playground-spec/   Integration contract for any host site that wants to
                    embed the in-browser playground.
 demo-seeder/       Operational tool: generates a signed demo WAL on an
                    airgapped machine. Excluded from the verifier crates'
-                   dependency graph so its `rand` deps cannot reach the
+                   dependency graph so its random-number dependencies cannot reach the
                    wasm bundle.
 ```
 

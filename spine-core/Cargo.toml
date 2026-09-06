@@ -3,6 +3,7 @@ name = "spine-core"
 description = "Pure WAL verification primitives for Spine: BLAKE3 chain hashing and Ed25519 signature verification. No filesystem, no network, no signing."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -18,15 +19,15 @@ iso-timestamps = ["dep:chrono"]
 blake3 = { version = "1.5", default-features = false, features = ["std"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
-serde_json = { version = "1.0", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.151", default-features = false, features = ["std"] }
 hex = { version = "0.4", default-features = false, features = ["std"] }
-thiserror = "2.0"
+thiserror = "2.0.19"
 unicode-normalization = { version = "0.1", default-features = false, features = ["std"] }
 # subtle is already transitive via ed25519-dalek; declared explicitly here
 # because the strict verifier uses ConstantTimeEq directly and the dependency
 # should be visible to anyone reading spine-core's Cargo.toml.
 subtle = { version = "2.6", default-features = false }
-chrono = { version = "0.4", default-features = false, optional = true }
+chrono = { version = "0.4.45", default-features = false, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # wasm-bindgen lives in spine-wasm, NOT here. spine-core stays façade-free.
