@@ -47,7 +47,7 @@ pub use audit_pack::{
     AuditPackIntervalV1, AuditPackPolicy, AuditPackReport, AuditPackSignatureV1, AuditPackV1,
     AUDIT_PACK_DOMAIN_V1, AUDIT_PACK_ID_DOMAIN_V1, AUDIT_PACK_SCHEMA_V1,
 };
-pub use canonical::{canonical_json, canonical_json_from_bytes, CanonicalError};
+pub use canonical::{canonical_json, canonical_json_from_bytes, parse_json_strict, CanonicalError};
 pub use checkpoint::{
     public_checkpoint_message, verify_public_checkpoint, CheckpointError, PublicCheckpoint,
     CHECKPOINT_DOMAIN_SEP, CHECKPOINT_SCHEMA,

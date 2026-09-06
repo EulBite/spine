@@ -104,7 +104,7 @@ pub fn run_audit_pack(
 ) -> Result<bool, String> {
     ensure_file_size(input, MAX_AUDIT_PACK_INPUT_BYTES)?;
     let bytes = fs::read(input).map_err(|error| format!("read {}: {error}", input.display()))?;
-    let pack: AuditPackV1 = serde_json::from_slice(&bytes)
+    let pack: AuditPackV1 = spine_core::parse_json_strict(&bytes)
         .map_err(|error| format!("parse {}: {error}", input.display()))?;
     let policy = AuditPackPolicy {
         expected_tenant_id: tenant_id.to_string(),
@@ -196,7 +196,7 @@ fn load_receipts(input: &Path, history: bool) -> Result<Vec<CheckpointReceiptV2>
                     index + 1
                 ));
             }
-            let receipt = serde_json::from_str(line).map_err(|error| {
+            let receipt = spine_core::parse_json_strict(line.as_bytes()).map_err(|error| {
                 format!("parse {} line {}: {error}", input.display(), index + 1)
             })?;
             receipts.push(receipt);
@@ -209,7 +209,7 @@ fn load_receipts(input: &Path, history: bool) -> Result<Vec<CheckpointReceiptV2>
         }
         Ok(receipts)
     } else {
-        let receipt = serde_json::from_str(&text)
+        let receipt = spine_core::parse_json_strict(text.as_bytes())
             .map_err(|error| format!("parse {}: {error}", input.display()))?;
         Ok(vec![receipt])
     }

@@ -176,7 +176,7 @@ fn resolve_expected_root(
         )
     })?;
     let json = fs::read_to_string(path).map_err(VerifyCmdError::CheckpointRead)?;
-    let checkpoint: PublicCheckpoint = serde_json::from_str(&json)
+    let checkpoint: PublicCheckpoint = spine_core::parse_json_strict(json.as_bytes())
         .map_err(|error| VerifyCmdError::Checkpoint(error.to_string()))?;
     let now_ns = chrono::Utc::now().timestamp_nanos_opt().ok_or_else(|| {
         VerifyCmdError::Checkpoint("system clock is outside the supported nanosecond range".into())

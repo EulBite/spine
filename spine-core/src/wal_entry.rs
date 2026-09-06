@@ -378,17 +378,14 @@ pub fn validate_entry_hashes(entry: &WalEntry) -> Vec<String> {
 /// verifier can ingest records from heterogeneous producers without
 /// every producer agreeing on field names upfront.
 ///
-/// ## Alias precedence and last-wins
+/// ## Alias collisions
 ///
 /// When a record contains BOTH the canonical field name and one of
-/// its aliases (e.g. both `sequence` and `seq`), serde keeps the
-/// LAST occurrence in JSON document order. This is undocumented in
-/// serde but stable; a producer that accidentally emits both will
-/// see the second value win silently. Lenient verifiers MUST NOT
-/// rely on this for security: a record carrying conflicting copies
-/// of `payload_hash` and `hash` is a producer bug, and the strict
-/// verifier rejects the record outright via the canonical-JSON
-/// payload-hash recompute.
+/// its aliases (e.g. both `sequence` and `seq`), typed deserialization
+/// rejects the duplicate field, regardless of order or whether the values
+/// agree. Each alias remains accepted on its own. Raw JSON must enter through
+/// [`crate::parse_json_strict`] so repeated names inside untyped payloads and
+/// unknown fields are also rejected before any value can be discarded.
 ///
 /// The complete alias set, for reference:
 ///

@@ -114,11 +114,13 @@ pub fn verify_checkpoint_v2_json(receipt_json: &str, policy_json: &str) -> Strin
     if let Err(error) = check_evidence_input_sizes(receipt_json, policy_json) {
         return error_envelope("InputLimitExceeded", &error);
     }
-    let receipt: CheckpointReceiptV2 = match serde_json::from_str(receipt_json) {
+    let receipt: CheckpointReceiptV2 = match spine_core::parse_json_strict(receipt_json.as_bytes())
+    {
         Ok(receipt) => receipt,
         Err(error) => return error_envelope("InvalidCheckpointJson", &error.to_string()),
     };
-    let policy: CheckpointTrustPolicy = match serde_json::from_str(policy_json) {
+    let policy: CheckpointTrustPolicy = match spine_core::parse_json_strict(policy_json.as_bytes())
+    {
         Ok(policy) => policy,
         Err(error) => return error_envelope("InvalidTrustPolicyJson", &error.to_string()),
     };
@@ -132,11 +134,15 @@ pub fn verify_checkpoint_history_v2_json(history_json: &str, policy_json: &str) 
     if let Err(error) = check_evidence_input_sizes(history_json, policy_json) {
         return error_envelope("InputLimitExceeded", &error);
     }
-    let history: Vec<CheckpointReceiptV2> = match serde_json::from_str(history_json) {
-        Ok(history) => history,
-        Err(error) => return error_envelope("InvalidCheckpointHistoryJson", &error.to_string()),
-    };
-    let policy: CheckpointTrustPolicy = match serde_json::from_str(policy_json) {
+    let history: Vec<CheckpointReceiptV2> =
+        match spine_core::parse_json_strict(history_json.as_bytes()) {
+            Ok(history) => history,
+            Err(error) => {
+                return error_envelope("InvalidCheckpointHistoryJson", &error.to_string())
+            }
+        };
+    let policy: CheckpointTrustPolicy = match spine_core::parse_json_strict(policy_json.as_bytes())
+    {
         Ok(policy) => policy,
         Err(error) => return error_envelope("InvalidTrustPolicyJson", &error.to_string()),
     };
@@ -150,11 +156,11 @@ pub fn verify_audit_pack_v1_json(pack_json: &str, policy_json: &str) -> String {
     if let Err(error) = check_evidence_input_sizes(pack_json, policy_json) {
         return error_envelope("InputLimitExceeded", &error);
     }
-    let pack: AuditPackV1 = match serde_json::from_str(pack_json) {
+    let pack: AuditPackV1 = match spine_core::parse_json_strict(pack_json.as_bytes()) {
         Ok(pack) => pack,
         Err(error) => return error_envelope("InvalidAuditPackJson", &error.to_string()),
     };
-    let policy: AuditPackPolicy = match serde_json::from_str(policy_json) {
+    let policy: AuditPackPolicy = match spine_core::parse_json_strict(policy_json.as_bytes()) {
         Ok(policy) => policy,
         Err(error) => return error_envelope("InvalidAuditPackPolicyJson", &error.to_string()),
     };
@@ -350,5 +356,92 @@ mod tests {
         let invalid = parse(&invalid);
         assert_eq!(invalid["ok"], true);
         assert_eq!(invalid["valid"], false);
+    }
+
+    #[test]
+    fn evidence_wrappers_reject_duplicate_json_before_verification() {
+        type Wrapper = fn(&str, &str) -> String;
+        let fixture = evidence_fixture();
+        let checkpoint_policy = checkpoint_policy(&fixture);
+        let pack_policy = serde_json::json!({
+            "expected_tenant_id": "tenant-a",
+            "checkpoint_policy": parse(&checkpoint_policy)
+        })
+        .to_string();
+        let cases: [(Wrapper, String, &str, &str, &str); 3] = [
+            (
+                verify_checkpoint_v2_json,
+                fixture["checkpoint_history"][0].to_string(),
+                &checkpoint_policy,
+                "InvalidCheckpointJson",
+                "InvalidTrustPolicyJson",
+            ),
+            (
+                verify_checkpoint_history_v2_json,
+                fixture["checkpoint_history"].to_string(),
+                &checkpoint_policy,
+                "InvalidCheckpointHistoryJson",
+                "InvalidTrustPolicyJson",
+            ),
+            (
+                verify_audit_pack_v1_json,
+                fixture["audit_pack"].to_string(),
+                &pack_policy,
+                "InvalidAuditPackJson",
+                "InvalidAuditPackPolicyJson",
+            ),
+        ];
+        for (verify, evidence, policy, evidence_error, policy_error) in cases {
+            assert_eq!(parse(&verify(&evidence, policy))["valid"], true);
+            let ambiguous = evidence.replacen("{", r#"{"extra":[{"a":1,"\u0061":2}],"#, 1);
+            let envelope = parse(&verify(&ambiguous, policy));
+            assert_eq!(envelope["ok"], false);
+            assert_eq!(envelope["error"]["kind"], evidence_error);
+            assert!(envelope["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("duplicate JSON object key"));
+
+            let ambiguous_policy = policy.replacen("{", r#"{"extra":{"a":1,"a":2},"#, 1);
+            let envelope = parse(&verify(&evidence, &ambiguous_policy));
+            assert_eq!(envelope["ok"], false);
+            assert_eq!(envelope["error"]["kind"], policy_error);
+            assert!(envelope["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("duplicate JSON object key"));
+
+            let trailing = parse(&verify(&format!("{evidence} {{}}"), policy));
+            assert_eq!(trailing["ok"], false);
+            assert_eq!(trailing["error"]["kind"], evidence_error);
+        }
+    }
+
+    #[test]
+    fn audit_pack_wrapper_rejects_ambiguous_tenant_payload_with_valid_signature() {
+        let fixture = evidence_fixture();
+        let original = fixture["audit_pack"].to_string();
+        let ambiguous = original.replacen(
+            r#""tenant_id":"tenant-a""#,
+            r#""tenant_id":"tenant-b","\u0074enant_id":"tenant-a""#,
+            1,
+        );
+        assert_ne!(original, ambiguous);
+        let policy = serde_json::json!({
+            "expected_tenant_id": "tenant-a",
+            "checkpoint_policy": parse(&checkpoint_policy(&fixture))
+        })
+        .to_string();
+        assert_eq!(
+            parse(&verify_audit_pack_v1_json(&original, &policy))["valid"],
+            true
+        );
+        let envelope = parse(&verify_audit_pack_v1_json(&ambiguous, &policy));
+        assert_eq!(envelope["ok"], false);
+        assert_eq!(envelope["error"]["kind"], "InvalidAuditPackJson");
+        assert!(envelope["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("duplicate JSON object key"));
     }
 }
