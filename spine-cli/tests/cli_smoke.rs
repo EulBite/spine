@@ -1128,3 +1128,174 @@ fn verify_streams_across_segments_without_merging_records() {
     assert_eq!(report["events_verified"], 4);
     assert_eq!(report["signatures_verified"], 4);
 }
+
+#[test]
+fn strict_rejects_duplicate_payload_members_without_resigning() {
+    let dir = tempfile::tempdir().unwrap();
+    let (public_key, root) = write_strict_wal(dir.path());
+    let path = dir.path().join("00000001.jsonl");
+    let original = std::fs::read_to_string(&path).unwrap();
+    let args = [
+        "verify",
+        "--strict",
+        "--wal",
+        path_str(dir.path()),
+        "--trusted-pubkey",
+        &public_key,
+        "--expected-root",
+        &root,
+        "--format",
+        "json",
+    ];
+    assert_eq!(code(&run(&args)), 0, "signed control must verify");
+    for ambiguous in [
+        original.replacen(
+            r#""amount":"100.00""#,
+            r#""amount":"900.00","amount":"100.00""#,
+            1,
+        ),
+        original.replacen(
+            r#""amount":"100.00""#,
+            r#""amount":"900.00","\u0061mount":"100.00""#,
+            1,
+        ),
+        original.replacen(r#""payload":"#, r#""payload":{},"payload":"#, 1),
+    ] {
+        assert_ne!(ambiguous, original, "mutation must change raw JSON");
+        std::fs::write(&path, ambiguous).unwrap();
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{}", stdout(&output));
+        assert!(stdout(&output).contains("duplicate JSON object key"));
+    }
+}
+
+#[test]
+fn wal_readers_reject_duplicate_nested_members_instead_of_rewriting_them() {
+    let dir = wal_dir();
+    let path = dir.path().join("00000001.jsonl");
+    let original = std::fs::read_to_string(&path).unwrap();
+    let commands = ["verify", "inspect", "export"];
+    for command in commands {
+        assert_eq!(code(&run(&[command, "--wal", path_str(dir.path())])), 0);
+    }
+    let ambiguous = original.replacen(
+        r#""payload":null"#,
+        r#""payload":{"outer":[{"amount":"900","\u0061mount":"100"}]}"#,
+        1,
+    );
+    assert_ne!(ambiguous, original);
+    std::fs::write(path, ambiguous).unwrap();
+    for command in commands {
+        let output = run(&[command, "--wal", path_str(dir.path())]);
+        assert_ne!(code(&output), 0, "{command} accepted ambiguous JSON");
+        let message = format!(
+            "{}{}",
+            stdout(&output),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(message.contains("duplicate JSON object key"), "{message}");
+    }
+}
+
+#[test]
+fn audit_pack_rejects_duplicate_tenant_identity_with_unchanged_proof() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pack.json");
+    let metadata = evidence_metadata();
+    let original = std::fs::read_to_string(evidence_fixture("audit-pack-v1.json")).unwrap();
+    let args = [
+        "verify-audit-pack",
+        "--input",
+        path_str(&path),
+        "--tenant-id",
+        "tenant-a",
+        "--operator-public-key",
+        metadata["operator_initial_public_key"].as_str().unwrap(),
+        "--witness-id",
+        metadata["witness_id"].as_str().unwrap(),
+        "--witness-public-key",
+        metadata["witness_public_key"].as_str().unwrap(),
+    ];
+    std::fs::write(&path, &original).unwrap();
+    assert_eq!(code(&run(&args)), 0, "producer fixture must verify");
+    let ambiguous = original.replacen(
+        r#""tenant_id": "tenant-a""#,
+        r#""tenant_id": "tenant-b", "\u0074enant_id": "tenant-a""#,
+        1,
+    );
+    assert_ne!(ambiguous, original);
+    std::fs::write(&path, ambiguous).unwrap();
+    let output = run(&args);
+    assert_eq!(code(&output), 2);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate JSON object key"));
+}
+
+#[test]
+fn keystore_rejects_duplicate_key_ids_before_selecting_a_trust_anchor() {
+    let dir = wal_dir();
+    let path = dir.path().join("keys.json");
+    let key = hex::encode(SigningKey::from_bytes(&[31; 32]).verifying_key().to_bytes());
+    let original = format!(r#"{{"schema":"spine-keystore-v1","keys":{{"primary":"{key}"}}}}"#);
+    let args = [
+        "verify",
+        "--wal",
+        path_str(dir.path()),
+        "--keystore",
+        path_str(&path),
+    ];
+    std::fs::write(&path, &original).unwrap();
+    assert_eq!(code(&run(&args)), 0);
+    let ambiguous = original.replacen(r#""primary":"#, r#""primary":"ignored","\u0070rimary":"#, 1);
+    std::fs::write(&path, ambiguous).unwrap();
+    let output = run(&args);
+    assert_eq!(code(&output), 2);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate JSON object key"));
+}
+
+#[test]
+fn checkpoint_readers_reject_duplicates_in_unknown_nested_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("checkpoint.json");
+    let metadata = evidence_metadata();
+    let receipt = metadata["checkpoint_history"][0].to_string();
+    let ambiguous = receipt.replacen("{", r#"{"extra":{"a":1,"a":2},"#, 1);
+    for history in [false, true] {
+        let mut args = vec![
+            "verify-checkpoint",
+            "--input",
+            path_str(&path),
+            "--operator-public-key",
+            metadata["operator_initial_public_key"].as_str().unwrap(),
+            "--witness-id",
+            metadata["witness_id"].as_str().unwrap(),
+            "--witness-public-key",
+            metadata["witness_public_key"].as_str().unwrap(),
+        ];
+        if history {
+            args.push("--history");
+        }
+        std::fs::write(&path, &receipt).unwrap();
+        assert_eq!(code(&run(&args)), 0);
+        std::fs::write(&path, &ambiguous).unwrap();
+        let output = run(&args);
+        assert_eq!(code(&output), 2);
+        assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate JSON object key"));
+    }
+
+    let wal = wal_dir();
+    let public_key = write_checkpoint(&path, &"00".repeat(32), 33, 1_700_000_000_000_000_000);
+    let original = std::fs::read_to_string(&path).unwrap();
+    let ambiguous = original.replacen("{", r#"{"extra":{"a":1,"a":2},"#, 1);
+    std::fs::write(&path, ambiguous).unwrap();
+    let output = run(&[
+        "verify",
+        "--wal",
+        path_str(wal.path()),
+        "--checkpoint",
+        path_str(&path),
+        "--checkpoint-pubkey",
+        &public_key,
+    ]);
+    assert_eq!(code(&output), 2);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate JSON object key"));
+}

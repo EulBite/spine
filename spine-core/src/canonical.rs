@@ -62,7 +62,12 @@
 //! `encode_utf16().collect::<Vec<u16>>()` and compares those, so the result
 //! matches `Array.prototype.sort()` exactly.
 
+use serde::de::{
+    DeserializeOwned, DeserializeSeed, Error as DeError, MapAccess, SeqAccess, Visitor,
+};
 use serde_json::Value;
+use std::collections::HashSet;
+use std::fmt;
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
 
@@ -108,8 +113,123 @@ pub fn canonical_json(value: &Value) -> Result<Vec<u8>, CanonicalError> {
 /// Parse a JSON byte slice and canonicalize it in one shot.
 pub fn canonical_json_from_bytes(bytes: &[u8]) -> Result<Vec<u8>, CanonicalError> {
     let value: Value =
-        serde_json::from_slice(bytes).map_err(|e| CanonicalError::InvalidJson(e.to_string()))?;
+        parse_json_strict(bytes).map_err(|e| CanonicalError::InvalidJson(e.to_string()))?;
     canonical_json(&value)
+}
+
+/// Parse JSON while rejecting duplicate object members at every nesting level.
+///
+/// `serde_json` keeps the last value for duplicate keys in untyped objects and
+/// maps. That is unsafe at a cryptographic boundary because a producer,
+/// gateway and verifier may disagree about which value is authoritative.
+/// Every externally supplied Spine JSON document and JSONL record should enter
+/// through this function before typed deserialization.
+///
+/// Validation retains only object member names, then deserializes the same
+/// immutable bytes directly into `T`. This preserves typed error locations and
+/// avoids allocating an intermediate value tree for otherwise ignored fields.
+pub fn parse_json_strict<T>(bytes: &[u8]) -> Result<T, serde_json::Error>
+where
+    T: DeserializeOwned,
+{
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    StrictJsonSeed.deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    serde_json::from_slice(bytes)
+}
+
+struct StrictJsonSeed;
+
+impl<'de> DeserializeSeed<'de> for StrictJsonSeed {
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(StrictJsonVisitor)
+    }
+}
+
+struct StrictJsonVisitor;
+
+impl<'de> Visitor<'de> for StrictJsonVisitor {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON value without duplicate object keys")
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        StrictJsonSeed.deserialize(deserializer)
+    }
+
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        if value.is_finite() {
+            Ok(())
+        } else {
+            Err(E::custom("non-finite JSON number"))
+        }
+    }
+
+    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_string<E>(self, _value: String) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        while sequence.next_element_seed(StrictJsonSeed)?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_map<A>(self, mut object: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut seen = HashSet::with_capacity(object.size_hint().unwrap_or(0).min(1024));
+        while let Some(key) = object.next_key::<String>()? {
+            if seen.contains(&key) {
+                return Err(A::Error::custom(format!(
+                    "duplicate JSON object key: {key:?}"
+                )));
+            }
+            seen.insert(key);
+            object.next_value_seed(StrictJsonSeed)?;
+        }
+        Ok(())
+    }
 }
 
 fn write_value(value: &Value, out: &mut Vec<u8>) -> Result<(), CanonicalError> {
@@ -537,14 +657,105 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_keys_in_input_resolve_to_last_wins() {
-        // serde_json's default Map behaviour: later occurrence overwrites.
-        // RFC 8785 forbids duplicate keys in inputs, but enforcement is the
-        // caller's responsibility; we match JavaScript's `JSON.parse`
-        // last-wins behaviour for predictability.
+    fn duplicate_keys_in_input_are_rejected_at_every_depth() {
         let input = r#"{"a":1,"a":2}"#;
-        let result = canonical_json_from_bytes(input.as_bytes()).unwrap();
-        assert_eq!(String::from_utf8(result).unwrap(), r#"{"a":2}"#);
+        assert!(matches!(
+            canonical_json_from_bytes(input.as_bytes()),
+            Err(CanonicalError::InvalidJson(message)) if message.contains("duplicate JSON object key")
+        ));
+        let nested = r#"{"outer":[{"a":1,"a":2}]}"#;
+        assert!(matches!(
+            canonical_json_from_bytes(nested.as_bytes()),
+            Err(CanonicalError::InvalidJson(message)) if message.contains("duplicate JSON object key")
+        ));
+    }
+
+    #[test]
+    fn strict_parser_rejects_equivalent_escaped_keys_and_ignored_members() {
+        #[derive(Debug, serde::Deserialize)]
+        struct KnownField {
+            #[allow(dead_code)]
+            known: u64,
+        }
+        for input in [
+            r#"{"known":1,"\u006bnown":1}"#,
+            r#"{"known":1,"ignored":{"a":1,"\u0061":2}}"#,
+            r#"{"known":1,"ignored":[{"\uD834\uDD1E":1,"𝄞":2}]}"#,
+            r#"{"known":1,"ignored":{"":1,"":2}}"#,
+        ] {
+            let error = parse_json_strict::<KnownField>(input.as_bytes()).unwrap_err();
+            assert!(
+                error.to_string().contains("duplicate JSON object key"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_parser_requires_one_complete_bounded_json_document() {
+        for input in ["{} {}", "{}x", "[1,]", r#"{"x":"\uD800"}"#, "1e400"] {
+            assert!(
+                parse_json_strict::<Value>(input.as_bytes()).is_err(),
+                "{input}"
+            );
+        }
+        assert!(parse_json_strict::<Value>(&[b'"', 0xff, b'"']).is_err());
+        let deep = format!("{}null{}", "[".repeat(129), "]".repeat(129));
+        assert!(parse_json_strict::<Value>(deep.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn strict_parser_preserves_values_and_independent_object_key_scopes() {
+        let input = br#" {
+            "items":[{"same":1},{"same":2}],"nested":{"same":3},
+            "integer":18446744073709551615,"negative":-9223372036854775808,
+            "float":1.5,"minus_zero":-0,"empty":{},"null":null,
+            "truth":true,"text":"escaped\n\u0061"
+        } "#;
+        let expected: Value = serde_json::from_slice(input).unwrap();
+        assert_eq!(parse_json_strict::<Value>(input).unwrap(), expected);
+        assert_eq!(
+            parse_json_strict::<Vec<u64>>(b"[0,18446744073709551615]").unwrap(),
+            [0, u64::MAX]
+        );
+        assert_eq!(
+            parse_json_strict::<i64>(b"-9223372036854775808").unwrap(),
+            i64::MIN
+        );
+    }
+
+    #[test]
+    fn strict_parser_preserves_wal_aliases_and_rejects_ambiguous_alias_pairs() {
+        let input = format!(
+            r#"{{"seq":1,"ts_ns":42,"prev":"{}","hash":"{}"}}"#,
+            "00".repeat(32),
+            "ab".repeat(32)
+        );
+        let entry: crate::WalEntry = parse_json_strict(input.as_bytes()).unwrap();
+        assert_eq!(entry.sequence, 1);
+        assert_eq!(entry.timestamp_ns, 42);
+        assert_eq!(entry.format_version, 1);
+        for duplicate in [
+            input.replacen(r#""seq":1"#, r#""seq":1,"sequence":2"#, 1),
+            input.replacen(r#""seq":1"#, r#""sequence":2,"seq":1"#, 1),
+        ] {
+            assert!(parse_json_strict::<crate::WalEntry>(duplicate.as_bytes()).is_err());
+        }
+    }
+
+    #[test]
+    fn strict_parser_preserves_typed_error_source_location() {
+        #[derive(Debug, serde::Deserialize)]
+        struct Counter {
+            #[allow(dead_code)]
+            count: u64,
+        }
+        let input = b"{\n  \"count\": \"not-a-number\"\n}";
+        let expected = serde_json::from_slice::<Counter>(input).unwrap_err();
+        let actual = parse_json_strict::<Counter>(input).unwrap_err();
+        assert_eq!(actual.line(), expected.line());
+        assert_eq!(actual.column(), expected.column());
+        assert_eq!(actual.classify(), expected.classify());
     }
 
     #[test]

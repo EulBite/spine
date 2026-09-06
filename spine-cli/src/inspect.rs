@@ -324,12 +324,13 @@ where
             if line.trim().is_empty() {
                 continue;
             }
-            let entry: WalEntry =
-                serde_json::from_str(&line).map_err(|e| InspectCmdError::Parse {
+            let entry: WalEntry = spine_core::parse_json_strict(line.as_bytes()).map_err(|e| {
+                InspectCmdError::Parse {
                     path: seg.display().to_string(),
                     line: idx + 1,
                     details: e.to_string(),
-                })?;
+                }
+            })?;
             visit(entry)?;
         }
     }

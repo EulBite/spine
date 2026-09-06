@@ -359,7 +359,7 @@ pub fn verify_demo_wal(
         // record explicitly declared format_version (the WalEntry
         // serde default would otherwise silently coerce a missing
         // field into 1, masking producer bugs in the strict profile).
-        let raw_value: serde_json::Value = match serde_json::from_slice(line) {
+        let raw_value: serde_json::Value = match crate::canonical::parse_json_strict(line) {
             Ok(v) => v,
             Err(e) => {
                 let seq = prev_sequence.map(|s| s + 1).unwrap_or(record_count as u64);
@@ -961,6 +961,21 @@ mod tests {
             DemoRecordOutcome::Rejected {
                 reason: RejectedReason::UnsupportedFormatVersion { found: 999 }
             }
+        ));
+    }
+
+    #[test]
+    fn strict_rejects_duplicate_wal_keys_before_verification() {
+        let (_, public_key) = signer_keypair(0x7a);
+        let bytes = br#"{"format_version":3,"format_version":3}
+"#;
+        let report = verify_demo_wal(bytes, &public_key, &"00".repeat(32), 1);
+        assert_eq!(report.status, DemoStatus::Invalid);
+        assert!(matches!(
+            &report.records[0].outcome,
+            DemoRecordOutcome::Rejected {
+                reason: RejectedReason::ParseError { details, .. }
+            } if details.contains("duplicate JSON object key")
         ));
     }
 

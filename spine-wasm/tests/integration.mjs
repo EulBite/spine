@@ -171,6 +171,41 @@ async function main() {
         console.log('PASS determinism_byte_for_byte');
     }
 
+    // 7. Ambiguous JSON must fail before a last-wins parser can discard
+    // a competing value while preserving the signed payload commitment.
+    {
+        const text = walBytes.toString('utf-8');
+        const needle = '"amount":"100.00 EUR"';
+        assertTrue(text.includes(needle), 'fixture must contain the amount member');
+        for (const replacement of [
+            '"amount":"900.00 EUR","amount":"100.00 EUR"',
+            String.raw`"amount":"900.00 EUR","\u0061mount":"100.00 EUR"`,
+        ]) {
+            const ambiguous = Buffer.from(text.replace(needle, replacement), 'utf-8');
+            const strict = JSON.parse(
+                verify_demo_wal_json(ambiguous, pubkey, expectedRoot, MANIFEST_VERSION)
+            );
+            assertEq(strict.report.status, 'invalid', 'duplicate member strict status');
+            const rejected = strict.report.records.find(
+                (record) => record.reason?.kind === 'parse_error'
+            );
+            assertTrue(rejected !== undefined, 'duplicate member must be a parse error');
+            assertTrue(
+                rejected.reason.details.includes('duplicate JSON object key'),
+                'duplicate member reason must identify ambiguity'
+            );
+            const lenient = JSON.parse(verify_wal_bytes_json(ambiguous, expectedRoot));
+            assertEq(lenient.report.valid, false, 'duplicate member lenient status');
+            assertTrue(
+                lenient.report.errors.some((error) =>
+                    error.error_type === 'parse_error' &&
+                    error.details.includes('duplicate JSON object key')),
+                'lenient facade must also reject duplicate members'
+            );
+        }
+        console.log('PASS duplicate_json_members_rejected_in_both_facades');
+    }
+
     console.log('\nAll wasm integration checks passed.');
 }
 

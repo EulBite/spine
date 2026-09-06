@@ -3,6 +3,7 @@ name = "spine-wasm"
 description = "WebAssembly façade over spine-core for WAL, checkpoint-history, witness and audit-pack verification."
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
@@ -22,11 +23,11 @@ wasm-opt = false
 
 [dependencies]
 spine-core = { path = "../spine-core" }
-serde_json = { version = "1.0", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.151", default-features = false, features = ["std"] }
 serde = { version = "1.0", default-features = false, features = ["std"] }
 
 # wasm-bindgen is the only wasm-specific dep. It does not exist on native
 # builds; the rlib still compiles for `cargo test` so we can sanity-check
 # the JSON envelope shape without spinning up wasm-pack.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2"
+wasm-bindgen = "0.2.126"

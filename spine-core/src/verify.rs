@@ -335,7 +335,7 @@ impl<'a> LenientVerifier<'a> {
             return false;
         }
 
-        let entry: WalEntry = match serde_json::from_slice(line_trim_end) {
+        let entry: WalEntry = match crate::canonical::parse_json_strict(line_trim_end) {
             Ok(e) => e,
             Err(e) => {
                 let err = VerificationError {
@@ -1129,6 +1129,18 @@ mod tests {
         let r = verify_wal_bytes(&bytes);
         assert!(!r.valid);
         assert!(r.errors.iter().any(|e| e.error_type == "parse_error"));
+    }
+
+    #[test]
+    fn duplicate_wal_keys_are_parse_errors() {
+        let bytes = br#"{"format_version":1,"format_version":1}
+"#;
+        let result = verify_wal_bytes(bytes);
+        assert!(!result.valid);
+        assert_eq!(result.errors[0].error_type, "parse_error");
+        assert!(result.errors[0]
+            .details
+            .contains("duplicate JSON object key"));
     }
 
     #[test]

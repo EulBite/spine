@@ -15,7 +15,7 @@ use blake3::Hasher;
 use clap::Parser;
 use ed25519_dalek::{Signer, SigningKey};
 use rand_chacha::ChaCha20Rng;
-use rand_core::{OsRng, RngCore, SeedableRng};
+use rand_core::{Rng, SeedableRng};
 use serde_json::json;
 use spine_core::{
     compute_entry_hash, compute_entry_hash_for_signing, verify_demo_wal, DemoStatus, WalEntry,
@@ -70,14 +70,10 @@ fn main() -> Result<()> {
         );
     }
 
-    fs::create_dir_all(&args.output_dir).with_context(|| {
-        format!(
-            "create output directory {}",
-            args.output_dir.display()
-        )
-    })?;
+    fs::create_dir_all(&args.output_dir)
+        .with_context(|| format!("create output directory {}", args.output_dir.display()))?;
 
-    let signing_key = build_signing_key(args.deterministic_seed);
+    let signing_key = build_signing_key(args.deterministic_seed)?;
     let verifying_key = signing_key.verifying_key();
     let pubkey_hex = hex::encode(verifying_key.to_bytes());
 
@@ -86,7 +82,10 @@ fn main() -> Result<()> {
         eprintln!("Scenario: {SCENARIO_TAG}");
         eprintln!(
             "Output:   {}",
-            args.output_dir.canonicalize().unwrap_or_else(|_| args.output_dir.clone()).display()
+            args.output_dir
+                .canonicalize()
+                .unwrap_or_else(|_| args.output_dir.clone())
+                .display()
         );
         eprintln!("Pubkey:   {pubkey_hex}");
         eprintln!();
@@ -150,7 +149,10 @@ fn main() -> Result<()> {
             bail!("--non-interactive requires --deterministic-seed.");
         }
         eprintln!();
-        eprintln!("Generated {} records (test fixture, seed exposed in source).", entries.len());
+        eprintln!(
+            "Generated {} records (test fixture, seed exposed in source).",
+            entries.len()
+        );
         eprintln!("  WAL:      {}", wal_path.display());
         eprintln!("  Pubkey:   {}", pubkey_path.display());
         eprintln!("  Root:     {}", root_path.display());
@@ -175,13 +177,19 @@ fn main() -> Result<()> {
         eprintln!("Edit target sequence: {EDIT_TARGET_SEQUENCE}");
         eprintln!("Chain root: {expected_root}");
         eprintln!();
-        eprintln!("\x1b[1;31m================================================================\x1b[0m");
+        eprintln!(
+            "\x1b[1;31m================================================================\x1b[0m"
+        );
         eprintln!("\x1b[1;31m  PRIVATE KEY HEX (this is shown ONCE, copy to offline vault)\x1b[0m");
-        eprintln!("\x1b[1;31m================================================================\x1b[0m");
+        eprintln!(
+            "\x1b[1;31m================================================================\x1b[0m"
+        );
         eprintln!();
         eprintln!("  {}", private_hex.as_str());
         eprintln!();
-        eprintln!("\x1b[1;31m================================================================\x1b[0m");
+        eprintln!(
+            "\x1b[1;31m================================================================\x1b[0m"
+        );
         eprintln!();
         eprintln!("Press Enter once you have captured the private key.");
         eprintln!("After Enter, the in-memory copies are zeroised and the binary exits.");
@@ -197,8 +205,9 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn build_signing_key(seed: Option<u64>) -> SigningKey {
-    let mut bytes = [0u8; 32];
+fn build_signing_key(seed: Option<u64>) -> Result<SigningKey> {
+    // Wipe the seed even if OS entropy fails before a SigningKey is built.
+    let mut bytes = Zeroizing::new([0u8; 32]);
     match seed {
         Some(n) => {
             // ChaCha20 from a u64 seed expands a small operator
@@ -206,10 +215,11 @@ fn build_signing_key(seed: Option<u64>) -> SigningKey {
             // deterministic path used in tests; never reuse a value
             // for a release.
             let mut rng = ChaCha20Rng::seed_from_u64(n);
-            rng.fill_bytes(&mut bytes);
+            rng.fill_bytes(bytes.as_mut());
         }
         None => {
-            OsRng.fill_bytes(&mut bytes);
+            getrandom::fill(bytes.as_mut())
+                .map_err(|err| anyhow!("read OS entropy for signing key: {err}"))?;
         }
     }
     let key = SigningKey::from_bytes(&bytes);
@@ -217,7 +227,7 @@ fn build_signing_key(seed: Option<u64>) -> SigningKey {
     // internal copy. Two copies of the secret on the heap was the
     // round-1 finding.
     bytes.zeroize();
-    key
+    Ok(key)
 }
 
 fn seal_chain(signing_key: &SigningKey) -> Result<(Vec<WalEntry>, Vec<u8>, String)> {
@@ -305,4 +315,31 @@ fn manifest_skeleton(pubkey_hex: &str, expected_root: &str) -> String {
         "js_sha256": "REPLACE_WITH_SHA256"
     });
     serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seed_42_preserves_the_published_scenario_contract() {
+        // Golden values captured with rand_chacha 0.3.1 before migration.
+        // A dependency update must not silently change the demo key or WAL.
+        let key = build_signing_key(Some(42)).expect("deterministic signing key");
+        let pubkey = hex::encode(key.verifying_key().to_bytes());
+        assert_eq!(
+            pubkey,
+            "78eda21ba04a15e2000fe8810fe3e56741d23bb9ae44aa9d5bb21b76675ff34b"
+        );
+        let (entries, bytes, root) = seal_chain(&key).expect("seal scenario");
+        assert_eq!(entries.len(), 20);
+        assert_eq!(
+            root,
+            "6cdaaaaaad59b3d58772366e9d93f1973f64fba4119b1ac62e8ea534162a10d4"
+        );
+        let report = verify_demo_wal(&bytes, &pubkey, &root, MANIFEST_VERSION);
+        assert_eq!(report.status, DemoStatus::Valid);
+        assert_eq!(report.events_verified, 20);
+        assert_eq!(report.signatures_verified, 20);
+    }
 }

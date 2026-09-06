@@ -80,7 +80,7 @@ pub fn collect_wal_segments(dir: &Path) -> Result<Vec<PathBuf>, WalIoError> {
         let name_ok = path
             .file_name()
             .and_then(|n| n.to_str())
-            .map_or(true, |n| !NON_SEGMENT_SIDECARS.contains(&n));
+            .is_none_or(|n| !NON_SEGMENT_SIDECARS.contains(&n));
         if !name_ok {
             continue;
         }

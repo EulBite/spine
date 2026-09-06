@@ -189,11 +189,12 @@ impl Keystore {
             details: e.to_string(),
         })?;
 
-        let parsed: KeystoreFile =
-            serde_json::from_slice(&bytes).map_err(|e| ReceiptError::KeystoreLoad {
+        let parsed: KeystoreFile = crate::canonical::parse_json_strict(&bytes).map_err(|e| {
+            ReceiptError::KeystoreLoad {
                 path: path.display().to_string(),
                 details: format!("invalid JSON: {e}"),
-            })?;
+            }
+        })?;
 
         if parsed.schema != "spine-keystore-v1" {
             return Err(ReceiptError::KeystoreLoad {

@@ -7,8 +7,8 @@ members = [
 ]
 # `demo-seeder/` is a one-off operational tool used on an airgapped machine
 # to seed the playground demo. It is intentionally excluded
-# from the workspace because it pulls in `rand` / `rand_chacha` and
-# enables the `rand_core` feature on `ed25519-dalek`, both banned from
+# from the workspace because it pulls in `rand_chacha` and OS entropy
+# via `getrandom`, both banned from
 # the verifier crates' wasm32 dependency graph. Excluding it explicitly
 # (rather than relying on absence from `members`) prevents a future
 # `cargo build --workspace` invocation from accidentally compiling it.
@@ -19,6 +19,7 @@ exclude = [
 [workspace.package]
 version = "0.3.0"
 edition = "2021"
+rust-version = "1.88.0"
 license = "Apache-2.0"
 repository = "https://github.com/EulBite/spine"
 
